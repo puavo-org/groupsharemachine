@@ -5,23 +5,19 @@
     SPDX-FileCopyrightText: Tuomas Nurmi <dev@opinsys.fi>
     SPDX-License-Identifier: CC0-1.0
     -->
-    <id>externalportal</id>
-    <name>External Portal</name>
-    <summary>Dashboard Portal Widget</summary>
-    <description><![CDATA[A dashboard widget that displays the content from External Sites app on Dashboard in a pretty and inviting form.]]></description>
+    <id>groupsharemachine</id>
+    <name>Group Share Machine</name>
+    <summary>Add buttons to share files to a list of external groups</summary>
+    <description><![CDATA[Add buttons to share files to a list of external groups.]]></description>
     <version>0.0.1</version>
     <licence>agpl</licence>
     <author mail="dev@opinsys.fi" homepage="https://puavo.org">Tuomas Nurmi</author>
-    <namespace>ExternalPortal</namespace>
-    <category>dashboard</category>
+    <namespace>GroupShareMachine</namespace>
+    <category>files</category>
     <bugs>https://github.com/puavo-org/externalportal/issues</bugs>
     <dependencies>
-        <nextcloud min-version="24" max-version="24"/>
+        <nextcloud min-version="27" max-version="30"/>
     </dependencies>
     <navigations>
-        <navigation>
-            <name>External Portal</name>
-            <route>externalportal.page.index</route>
-        </navigation>
     </navigations>
 </info>
