@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 // SPDX-FileCopyrightText: Tuomas Nurmi <dev@opinsys.fi>
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -13,22 +14,26 @@ use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\Util;
 
-class Application extends App implements IBootstrap {
-	public const APP_ID = 'groupsharemachine';
+class Application extends App implements IBootstrap
+{
+    public const APP_ID = 'groupsharemachine';
 
-	public function __construct() {
-		parent::__construct(self::APP_ID);
-	}
+    public function __construct()
+    {
+        parent::__construct(self::APP_ID);
+    }
 
-	public function register(IRegistrationContext $context): void {
-	}
+    public function register(IRegistrationContext $context): void
+    {
+    }
 
-	public function boot(IBootContext $context): void {
-		/* @var IEventDispatcher $appEventDispatcher */
-		$appEventDispatcher = $context->getAppContainer()->get(IEventDispatcher::class);
+    public function boot(IBootContext $context): void
+    {
+        /* @var IEventDispatcher $appEventDispatcher */
+        $appEventDispatcher = $context->getAppContainer()->get(IEventDispatcher::class);
 
-		$appEventDispatcher->addListener(LoadAdditionalScriptsEvent::class, function () {
-			Util::addScript(self::APP_ID, 'groupsharemachine-groupsharemachine');
-		});
-	}
+        $appEventDispatcher->addListener(LoadAdditionalScriptsEvent::class, function () {
+            Util::addScript(self::APP_ID, 'groupsharemachine-groupsharemachine');
+        });
+    }
 }

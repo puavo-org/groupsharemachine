@@ -1,3 +1,7 @@
+<!--
+SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
 <template>
 	<div ref="newItem"
 		class="grid"
