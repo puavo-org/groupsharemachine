@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 		:title="t('cfg_share_links', 'Custom public link')"
 		:bold="false"
 		:force-display-actions="true">
-		<NcButton aria-label="Example text"
+		<NcButton aria-label="Example text" @click="shareContent"
 			:disabled="disabled"
 			:readonly="readonly"
 			type="primary">
@@ -37,6 +37,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 <script>
 import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
+import axios from '@nextcloud/axios'
+import { generateUrl } from '@nextcloud/router'
+import { showSuccess, showError } from '@nextcloud/dialogs'
+
 
 export default {
 	name: 'GroupListing',
@@ -48,7 +52,40 @@ export default {
 	mixins: [
 	],
 
+	methods: {
+		async shareContent() {
+			const values = {
+			  path: "/ekphps.mp4",
+			  shareType: 1,
+			  permissions: 1,
+			  shareWith: "testi4",
+			} // https://github.com/nextcloud/documentation/blob/master/developer_manual/client_apis/OCS/ocs-share-api.rst
+			const req = {
+				values,
+			}
+			const url = ('')
+			console.debug('"' + JSON.stringify(values) + '"')
+			try {
+				await axios.post(url, values)
+			} catch (e) {
+				showError(t('groupsharemachine', 'Failed to save external portal options') + `: ${e.response?.request?.responseText ?? ''}`)
+				console.debug(e)
+			}
+			showSuccess(t('groupsharemachine', 'Shared'))
+
+			const shareTab = OCA.Files.Sidebar.state.tabs.find(e => e.id === 'sharing')
+			if (shareTab) {
+				shareTab.update(this.fileInfo)
+			}
+		},
+	},
+
 	props: {
+			fileInfo: {
+			type: Object,
+			default: () => {},
+			required: true,
+		},
 	},
 	data() {
 		return {

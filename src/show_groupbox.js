@@ -38,7 +38,7 @@ window.addEventListener('DOMContentLoaded', function() {
 						}
 
 						sectionInstance = new View({
-							props: { },
+							props: { fileInfo },
 						})
 
 						props = Vue.observable({
