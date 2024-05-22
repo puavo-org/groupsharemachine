@@ -3,42 +3,45 @@ SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div ref="newItem"
-		class="grid"
-		:title="t('cfg_share_links', 'Custom public link')"
-		:bold="false"
-		:force-display-actions="true">
-		<NcButton aria-label="Example text" @click="shareContent"
-			:disabled="disabled"
-			:readonly="readonly"
-			type="primary">
-			<template v-if="style.indexOf('text') !== -1">
-				Group 1
-			</template>
-		</NcButton>
-		<NcButton aria-label="Example text 2"
-			:disabled="disabled"
-			:readonly="readonly"
-			type="primary">
-			<template v-if="style.indexOf('text') !== -1">
-				Group 2
-			</template>
-		</NcButton>
-		<NcButton aria-label="Example text 3"
-			:disabled="disabled"
-			:readonly="readonly"
-			type="primary">
-			<template v-if="style.indexOf('text') !== -1">
-				Group 3
-			</template>
-		</NcButton>
+		<div>
+		<h2> {{ t('groupsharemachine', 'Share to a group') }}</h2>
+			<div ref="newItem"
+				class="grid"
+				:title="t('groupsharemachine', 'Share to a group')"
+				:bold="false"
+				:force-display-actions="true">
+				<NcButton aria-label="Example text" @click="shareContent"
+				:disabled="disabled"
+				:readonly="readonly"
+				type="primary">
+				<template v-if="style.indexOf('text') !== -1">
+					Group 1
+				</template>
+			</NcButton>
+			<NcButton aria-label="Example text 2"
+				:disabled="disabled"
+				:readonly="readonly"
+				type="primary">
+				<template v-if="style.indexOf('text') !== -1">
+					Group 2
+				</template>
+			</NcButton>
+			<NcButton aria-label="Example text 3"
+				:disabled="disabled"
+				:readonly="readonly"
+				type="primary">
+				<template v-if="style.indexOf('text') !== -1">
+					Group 3
+				</template>
+			</NcButton>
+		</div>
 	</div>
 </template>
 
 <script>
 import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
 import axios from '@nextcloud/axios'
-import { generateOcsUrl } from '@nextcloud/router'
+import { generateUrl, generateOcsUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 
 
@@ -70,6 +73,14 @@ export default {
 
 	methods: {
 		async shareContent() {
+					const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
+			try {
+				const response = await axios.get(gurl)
+				console.debug('"' + JSON.stringify(response.data) + '"')
+			} catch (e) {
+				console.debug(e)
+			}
+
 			const values = {
 			  path: this.getFullPath,
 			  shareType: 1,

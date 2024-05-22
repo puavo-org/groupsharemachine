@@ -16,6 +16,6 @@ return [
     'resources' => [
     ],
     'routes' => [
-        ['name' => 'config#getConfig', 'url' => '/config', 'verb' => 'GET'],
+        ['name' => 'puavoQuery#getPuavoGroups', 'url' => '/puavoGroups', 'verb' => 'GET'],
     ]
 ];
