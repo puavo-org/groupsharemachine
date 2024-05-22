@@ -3,35 +3,23 @@ SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-		<div>
+	<div>
 		<h2> {{ t('groupsharemachine', 'Share to a group') }}</h2>
-			<div ref="newItem"
-				class="grid"
-				:title="t('groupsharemachine', 'Share to a group')"
-				:bold="false"
-				:force-display-actions="true">
-				<NcButton aria-label="Example text" @click="shareContent"
+		<div ref="newItem"
+			class="grid"
+			:title="t('groupsharemachine', 'Share to a group')"
+			:bold="false"
+			:force-display-actions="true">
+			<NcButton v-for="item in content"
+				:key="item.abbreviation"
 				:disabled="disabled"
 				:readonly="readonly"
-				type="primary">
+				:aria-label="item.name"
+				:groupabbrv="item.abbreviation"
+				type="primary"
+				@click="shareContent(item.abbreviation)">
 				<template v-if="style.indexOf('text') !== -1">
-					Group 1
-				</template>
-			</NcButton>
-			<NcButton aria-label="Example text 2"
-				:disabled="disabled"
-				:readonly="readonly"
-				type="primary">
-				<template v-if="style.indexOf('text') !== -1">
-					Group 2
-				</template>
-			</NcButton>
-			<NcButton aria-label="Example text 3"
-				:disabled="disabled"
-				:readonly="readonly"
-				type="primary">
-				<template v-if="style.indexOf('text') !== -1">
-					Group 3
+					{{ item.name }}
 				</template>
 			</NcButton>
 		</div>
@@ -44,13 +32,32 @@ import axios from '@nextcloud/axios'
 import { generateUrl, generateOcsUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 
-
 export default {
 	name: 'GroupListing',
 
 	components: {
 		NcButton,
 	},
+
+	mixins: [
+	],
+
+	props: {
+		fileInfo: {
+			type: Object,
+			default: () => {},
+			required: true,
+		},
+	},
+	data() {
+		return {
+			disabled: false,
+			style: 'icontext',
+			loading: true,
+			content: [],
+		}
+	},
+
 	computed: {
 		getFullPath() { // From cfg_share_links/src/components/NewLink.vue
 			if (this.fileInfo) {
@@ -68,34 +75,54 @@ export default {
 		},
 	},
 
-	mixins: [
-	],
+	beforeMount() {
+		console.debug('preparing grouplisting')
+		this.getContent()
+	},
 
 	methods: {
-		async shareContent() {
-					const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
+		async getContent() {
+			const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
 			try {
 				const response = await axios.get(gurl)
-				console.debug('"' + JSON.stringify(response.data) + '"')
+				this.content = this.content.concat(response.data[0])
+				this.number = this.content.length
+				console.debug('"' + JSON.stringify(response.data[0]) + '"')
+			} catch (error) {
+				console.debug(error)
+			}
+			this.loading = false
+		},
+
+		async shareContent(target) {
+			const groupsearchUrl = generateOcsUrl('cloud/groups?search=', 2) + target
+			try {
+				const res = await axios.get(groupsearchUrl)
+				if (res.data.ocs.data.groups.length > 0) {
+					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data.ocs.data.groups) + '"')
+					target = res.data.ocs.data.groups[0]
+				} else {
+					showError(t('groupsharemachine', 'Failed to share') + ': no matching groups found')
+					return
+				}
 			} catch (e) {
+				showError(t('groupsharemachine', 'Failed to search for group') + `: ${e.response?.request?.responseText ?? ''}`)
 				console.debug(e)
+				return
 			}
 
 			const values = {
 			  path: this.getFullPath,
 			  shareType: 1,
 			  permissions: 1,
-			  shareWith: "testi4",
+			  shareWith: target,
 			} // https://github.com/nextcloud/documentation/blob/master/developer_manual/client_apis/OCS/ocs-share-api.rst
-			const req = {
-				values,
-			}
 			const url = generateOcsUrl('apps/files_sharing/api/v1/shares', 2)
 			console.debug('"' + JSON.stringify(values) + '"')
 			try {
 				await axios.post(url, values)
 			} catch (e) {
-				showError(t('groupsharemachine', 'Failed to save external portal options') + `: ${e.response?.request?.responseText ?? ''}`)
+				showError(t('groupsharemachine', 'Failed to share') + `: ${e.response?.request?.responseText ?? ''}`)
 				console.debug(e)
 			}
 			showSuccess(t('groupsharemachine', 'Shared'))
@@ -105,20 +132,6 @@ export default {
 				shareTab.update(this.fileInfo)
 			}
 		},
-	},
-
-	props: {
-			fileInfo: {
-			type: Object,
-			default: () => {},
-			required: true,
-		},
-	},
-	data() {
-		return {
-			disabled: false,
-			style: 'icontext',
-		}
 	},
 }
 </script>
