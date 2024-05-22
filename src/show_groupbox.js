@@ -30,7 +30,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				if (typeof fileInfo !== 'undefined' && typeof el !== 'undefined') {
 					// if instance exists, just update props
 					if (sectionInstance && window.document.contains(sectionInstance.$el) && props) {
-						// props.fileInfo = fileInfo
+						props.fileInfo = fileInfo
 					} else { // create new instance
 						if (sectionInstance) {
 							// if sectionInstance.$el doesnt exist anymore (after changing folder for example)
@@ -43,6 +43,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
 						props = Vue.observable({
 							...sectionInstance._props,
+							...{ fileInfo },
 						})
 						sectionInstance._props = props
 

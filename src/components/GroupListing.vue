@@ -38,7 +38,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <script>
 import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
 import axios from '@nextcloud/axios'
-import { generateUrl } from '@nextcloud/router'
+import { generateOcsUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 
 
@@ -48,6 +48,22 @@ export default {
 	components: {
 		NcButton,
 	},
+	computed: {
+		getFullPath() { // From cfg_share_links/src/components/NewLink.vue
+			if (this.fileInfo) {
+				if (this.fileInfo.path.endsWith('/')) {
+					return this.fileInfo.path.concat(this.fileInfo.name)
+				} else {
+					return this.fileInfo.path.concat('/', this.fileInfo.name)
+				}
+			} else {
+				return 'None'
+			}
+		},
+		canShare() { // From cfg_share_links/src/components/NewLink.vue
+			return !!(this.fileInfo.permissions & OC.PERMISSION_SHARE)
+		},
+	},
 
 	mixins: [
 	],
@@ -55,7 +71,7 @@ export default {
 	methods: {
 		async shareContent() {
 			const values = {
-			  path: "/ekphps.mp4",
+			  path: this.getFullPath,
 			  shareType: 1,
 			  permissions: 1,
 			  shareWith: "testi4",
@@ -63,7 +79,7 @@ export default {
 			const req = {
 				values,
 			}
-			const url = ('')
+			const url = generateOcsUrl('apps/files_sharing/api/v1/shares', 2)
 			console.debug('"' + JSON.stringify(values) + '"')
 			try {
 				await axios.post(url, values)
