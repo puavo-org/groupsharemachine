@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
 	<div>
-		<h2> {{ t('groupsharemachine', 'Share to a group') }}</h2>
+		<h2 v-if="content.length > 0"> {{ t('groupsharemachine', 'Share to a group') }}</h2>
 		<div ref="newItem"
 			class="grid"
 			:title="t('groupsharemachine', 'Share to a group')"
@@ -102,7 +102,7 @@ export default {
 					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data.ocs.data.groups) + '"')
 					target = res.data.ocs.data.groups[0]
 				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ': no matching groups found')
+					showError(t('groupsharemachine', 'Failed to share') + ':' + t('groupsharemachine', 'no matching groups found for ') + target) // TODO translations
 					return
 				}
 			} catch (e) {
