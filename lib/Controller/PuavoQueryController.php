@@ -84,7 +84,14 @@ class PuavoQueryController extends Controller
         curl_setopt($ch, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
         $response = curl_exec($ch);
         curl_close($ch);
-        $userresponse = json_decode($response); //TODO handle errors
+        $userresponse = json_decode($response);
+        if($userresponse->error) {
+            return new DataResponse([ "error" => $userresponse->error->code ]);
+        }
+        if(!in_array("teacher", $userresponse->roles) && !in_array("admin", $userresponse->roles)) {
+            return new DataResponse([ "warning" => "not teacher, no buttons" ]);
+        }
+
         $primarySchool = $userresponse->primary_school_dn;
 
         $gurl = "https://api.opinsys.fi/v4/groups?filter=school_id|is|" . $primarySchool . "&fields=abbreviation,type,name,school_id";
@@ -93,11 +100,17 @@ class PuavoQueryController extends Controller
         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch2, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
-        $gresponse = curl_exec($ch2);
-        $groupresponse = array_filter(json_decode($gresponse, true)['data'], function ($var) { //TODO handle errors
+        $groupqueryreply = curl_exec($ch2);
+        $gresponse = json_decode($groupqueryreply, true);
+        curl_close($ch2);
+
+        if(!$gresponse) {
+            return new DataResponse([ "error" => $groupqueryreply ]);
+        }
+
+        $groupresponse = array_filter($gresponse['data'], function ($var) {
             return $var["type"] == "teaching group";
         });
-        curl_close($ch);
 
         return new DataResponse([ $groupresponse ]);
     }
