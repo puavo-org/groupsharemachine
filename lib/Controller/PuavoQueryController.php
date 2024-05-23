@@ -115,7 +115,7 @@ class PuavoQueryController extends Controller
             return $var["type"] == "teaching group";
         });
 
-        return new DataResponse([ $groupresponse ]);
+        return new DataResponse([ array_values($groupresponse) ]);
     }
 
 }

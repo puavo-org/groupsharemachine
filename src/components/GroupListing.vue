@@ -86,7 +86,6 @@ export default {
 			try {
 				const response = await axios.get(gurl)
 				this.content = this.content.concat(response.data[0])
-				this.number = this.content.length
 				console.debug('"' + JSON.stringify(response.data[0]) + '"')
 			} catch (error) {
 				console.debug(error)
