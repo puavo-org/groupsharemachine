@@ -75,8 +75,11 @@ class PuavoQueryController extends Controller
         $credentials = $apiuser . ":" . $apipass;
         $ch = curl_init();
 
-        //$user=$this->userId;
-        $user = "tuomasapi";
+        $user = $this->userId;
+        //$user = "tuomasapi";
+        if(ctype_digit($user)) {
+            $user = "_by_id/" . $user;
+        }
         $url = "https://api.opinsys.fi/v3/users/" . $user;
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
