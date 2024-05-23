@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Opinsys <dev@opinsys.fi>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+From 7ebc888217408d45168eb8200d50ad1c3dee50a2 Mon Sep 17 00:00:00 2001
+From: Tuomas Nurmi <tuomas.nurmi@opinsys.fi>
+Date: Thu, 23 May 2024 13:52:37 +0300
+Subject: [PATCH] Add a Lehrer-sized hole to sharing group restriction check
+
+---
+ lib/private/Share20/Manager.php | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/lib/private/Share20/Manager.php b/lib/private/Share20/Manager.php
+index 53dbf65ccc7..794b3bfd77c 100644
+--- a/lib/private/Share20/Manager.php
++++ b/lib/private/Share20/Manager.php
+@@ -626,9 +626,21 @@ class Manager implements IManager {
+ 
+ 			// optional excluded groups
+ 			$excludedGroups = $this->shareWithGroupMembersOnlyExcludeGroupsList();
+-			if (is_null($sharedWith) || in_array($share->getSharedWith(), $excludedGroups) || !$sharedWith->inGroup($sharedBy)) {
++			if (is_null($sharedWith) || in_array($share->getSharedWith(), $excludedGroups)) {
+ 				throw new \Exception('Sharing is only allowed within your own groups');
+ 			}
++			if (!$sharedWith->inGroup($sharedBy))
++			{
++				$found = -1;
++				foreach($this->groupManager->getUserGroupNames($sharedBy) as $index => $thisGroup) {
++					if (stripos(implode($thisGroup), "lehrer") !== FALSE)
++						$found = $index;
++				}
++				if($found == -1)
++				{
++					throw new \Exception('Sharing is only allowed within your own groups');
++				}
++			}
+ 		}
+ 
+ 		/*
+-- 
+2.44.0
+
