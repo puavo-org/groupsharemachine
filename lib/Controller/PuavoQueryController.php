@@ -31,6 +31,7 @@ use OCP\Files\IAppData;
 use OCP\AppFramework\Http\DataDisplayResponse;
 
 use OCP\IConfig;
+use OCP\IGroupManager;
 use OCP\IServerContainer;
 
 use OCP\AppFramework\Http;
@@ -53,6 +54,7 @@ class PuavoQueryController extends Controller
         $AppName,
         IRequest $request,
         IServerContainer $serverContainer,
+        IGroupManager $groupManager,
         IConfig $config,
         IAppData $appData,
         ?string $userId
@@ -62,6 +64,19 @@ class PuavoQueryController extends Controller
         $this->appData = $appData;
         $this->serverContainer = $serverContainer;
         $this->config = $config;
+        $this->groupManager = $groupManager;
+    }
+
+    /**
+     * @NoAdminRequired
+     */
+    public function searchNextcloudGroups(string $name): DataResponse
+    {
+        $groups = $this->groupManager->search($name);
+        $groups = array_map(function ($group) {
+            return $group->getGID();
+        }, $groups);
+        return new DataResponse($groups);
     }
 
     /**

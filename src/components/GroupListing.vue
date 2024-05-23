@@ -94,14 +94,15 @@ export default {
 		},
 
 		async shareContent(target) {
-			const groupsearchUrl = generateOcsUrl('cloud/groups?search=', 2) + target
+			const groupsearchUrl = generateUrl('/apps/groupsharemachine/searchNextcloudGroups/', 2) + target
 			try {
 				const res = await axios.get(groupsearchUrl)
-				if (res.data.ocs.data.groups.length > 0) {
-					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data.ocs.data.groups) + '"')
-					target = res.data.ocs.data.groups[0]
+				console.debug('"' + JSON.stringify(res) + '"')
+				if (res.data.length > 0) {
+					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data) + '"')
+					target = res.data[0]
 				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ':' + t('groupsharemachine', 'no matching groups found for ') + target) // TODO translations
+					showError(t('groupsharemachine', 'Failed to share') + ':' + t('groupsharemachine', 'no matching groups found for ') + target)
 					return
 				}
 			} catch (e) {
@@ -138,9 +139,10 @@ export default {
 <style lang="scss" scoped>
 .grid {
 	display: grid;
-	grid-template-columns: 1fr 1fr 1fr 1fr;
+	grid-template-columns: 1fr 1fr 1fr;
 	grid-template-rows: repeat(auto-fill, auto);
 	position: relative;
 	margin: 0.5rem 0;
+	row-gap: 0.5rem;
 }
 </style>

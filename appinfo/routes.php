@@ -17,5 +17,6 @@ return [
     ],
     'routes' => [
         ['name' => 'puavoQuery#getPuavoGroups', 'url' => '/puavoGroups', 'verb' => 'GET'],
+        ['name' => 'puavoQuery#searchNextcloudGroups', 'url' => '/searchNextcloudGroups/{name}', 'verb' => 'GET'],
     ]
 ];
