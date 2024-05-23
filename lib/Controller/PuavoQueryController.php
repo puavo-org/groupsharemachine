@@ -53,6 +53,7 @@ class PuavoQueryController extends Controller
         $AppName,
         IRequest $request,
         IServerContainer $serverContainer,
+        IConfig $config,
         IAppData $appData,
         ?string $userId
     ) {
@@ -60,6 +61,7 @@ class PuavoQueryController extends Controller
         $this->userId = $userId;
         $this->appData = $appData;
         $this->serverContainer = $serverContainer;
+        $this->config = $config;
     }
 
     /**
@@ -67,18 +69,22 @@ class PuavoQueryController extends Controller
      */
     public function getPuavoGroups(): DataResponse
     {
-        $credentials = "tuomasapi:";
+        $apiuser = $this->config->getAppValue(Application::APP_ID, 'apiuser', 'username');
+        $apipass = $this->config->getAppValue(Application::APP_ID, 'apipassword', 'password');
+        $apihost = $this->config->getAppValue(Application::APP_ID, 'apihost', 'demo.opinsys.fi');
+        $credentials = $apiuser . ":" . $apipass;
         $ch = curl_init();
+
         //$user=$this->userId;
         $user = "tuomasapi";
         $url = "https://api.opinsys.fi/v3/users/" . $user;
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array('Host: demo.opinsys.fi', "Authorization: Basic " . base64_encode($credentials)));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
         $response = curl_exec($ch);
         curl_close($ch);
-        $userresponse = json_decode($response);
+        $userresponse = json_decode($response); //TODO handle errors
         $primarySchool = $userresponse->primary_school_dn;
 
         $gurl = "https://api.opinsys.fi/v4/groups?filter=school_id|is|" . $primarySchool . "&fields=abbreviation,type,name,school_id";
@@ -86,9 +92,9 @@ class PuavoQueryController extends Controller
         curl_setopt($ch2, CURLOPT_URL, $gurl);
         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch2, CURLOPT_HTTPHEADER, array('Host: demo.opinsys.fi', "Authorization: Basic " . base64_encode($credentials)));
+        curl_setopt($ch2, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
         $gresponse = curl_exec($ch2);
-        $groupresponse = array_filter(json_decode($gresponse, true)['data'], function ($var) {
+        $groupresponse = array_filter(json_decode($gresponse, true)['data'], function ($var) { //TODO handle errors
             return $var["type"] == "teaching group";
         });
         curl_close($ch);
