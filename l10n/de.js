@@ -1,11 +1,11 @@
 OC.L10N.register(
     "groupsharemachine",
     {
-    "Share to a group" : "Jaa ryhmälle",
-    "Filter groups" : "Suodata ryhmiä",
-    "Failed to share" : "Jakaminen epäonnistui",
-    "no matching groups found for {group}" : "ei löytynyt täsmääviä ryhmiä ryhmälle",
-    "Failed to search for group" : "Ryhmän etsiminen epäonnistui",
-    "Shared" : "Jaettu"
+    "Share to a group" : "Gruppenfreigabe",
+    "Filter groups" : "Gruppen filtern",
+    "Failed to share" : "Freigabe fehlgeschlagen",
+    "no matching groups found for {group}" : "Keine entsprechende Gruppe für {group} wurde gefunden",
+    "Failed to search for group" : "Suche nach der Gruppe fehlgeschlagen",
+    "Shared" : "Freigegeben"
 },
 "nplurals=2; plural=(n != 1);");
