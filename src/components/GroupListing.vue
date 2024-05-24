@@ -124,7 +124,7 @@ export default {
 					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data) + '"')
 					target = res.data[0]
 				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for') + ' ' + target)
+					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for {group}', {group: target}))
 					return
 				}
 			} catch (e) {

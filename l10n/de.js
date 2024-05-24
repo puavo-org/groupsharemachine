@@ -4,7 +4,7 @@ OC.L10N.register(
     "Share to a group" : "Jaa ryhmälle",
     "Filter groups" : "Suodata ryhmiä",
     "Failed to share" : "Jakaminen epäonnistui",
-    "no matching groups found for" : "ei löytynyt täsmääviä ryhmiä ryhmälle",
+    "no matching groups found for {group}" : "ei löytynyt täsmääviä ryhmiä ryhmälle",
     "Failed to search for group" : "Ryhmän etsiminen epäonnistui",
     "Shared" : "Jaettu"
 },
