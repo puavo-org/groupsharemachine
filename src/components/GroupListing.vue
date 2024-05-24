@@ -23,7 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 			:title="t('groupsharemachine', 'Share to a group')"
 			:bold="false"
 			:force-display-actions="true">
-			<NcButton v-for="item in filteredContent"
+			<NcButton v-for="item in sortedFilteredContent"
 				:key="item.abbreviation"
 				:aria-label="item.name"
 				:groupabbrv="item.abbreviation"
@@ -85,6 +85,9 @@ export default {
 		canShare() { // From cfg_share_links/src/components/NewLink.vue
 			return !!(this.fileInfo.permissions & OC.PERMISSION_SHARE)
 		},
+		sortedFilteredContent() {
+			return this.filteredContent.toSorted((a, b) => (a.name.toLowerCase().trim().localeCompare(b.name.toLowerCase().trim())))
+		},
 		filteredContent() {
 			if (this.filtertext.length === 0) {
 				return this.content
@@ -124,7 +127,7 @@ export default {
 					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data) + '"')
 					target = res.data[0]
 				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for {group}', {group: target}))
+					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for {group}', { group: target }))
 					return
 				}
 			} catch (e) {
