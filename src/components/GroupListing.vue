@@ -3,24 +3,33 @@ SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div>
-		<h2 v-if="content.length > 0"> {{ t('groupsharemachine', 'Share to a group') }}</h2>
+	<div v-if="content.length > 0">
+		<div class="widgetheaderdiv">
+			<h2 class="widgetheader">
+				{{ t('groupsharemachine', 'Share to a group') }}
+			</h2>
+			<NcTextField v-if="content.length > 3"
+				style="width: auto;"
+				:value.sync="filtertext"
+				:label="t('groupsharemachine', 'Filter groups')"
+				trailing-button-icon="close"
+				:show-trailing-button="filtertext !== ''"
+				@trailing-button-click="clearFilter">
+				<Magnify :size="18" />
+			</NcTextField>
+		</div>
 		<div ref="newItem"
 			class="grid"
 			:title="t('groupsharemachine', 'Share to a group')"
 			:bold="false"
 			:force-display-actions="true">
-			<NcButton v-for="item in content"
+			<NcButton v-for="item in filteredContent"
 				:key="item.abbreviation"
-				:disabled="disabled"
-				:readonly="readonly"
 				:aria-label="item.name"
 				:groupabbrv="item.abbreviation"
 				type="primary"
 				@click="shareContent(item.abbreviation)">
-				<template v-if="style.indexOf('text') !== -1">
-					{{ item.name }}
-				</template>
+				{{ item.name }}
 			</NcButton>
 		</div>
 	</div>
@@ -28,6 +37,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 <script>
 import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
+import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'
+import Magnify from 'vue-material-design-icons/Magnify.vue'
 import axios from '@nextcloud/axios'
 import { generateUrl, generateOcsUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
@@ -37,6 +48,8 @@ export default {
 
 	components: {
 		NcButton,
+		NcTextField,
+		Magnify,
 	},
 
 	mixins: [
@@ -51,8 +64,7 @@ export default {
 	},
 	data() {
 		return {
-			disabled: false,
-			style: 'icontext',
+			filtertext: '',
 			loading: true,
 			content: [],
 		}
@@ -73,6 +85,12 @@ export default {
 		canShare() { // From cfg_share_links/src/components/NewLink.vue
 			return !!(this.fileInfo.permissions & OC.PERMISSION_SHARE)
 		},
+		filteredContent() {
+			if (this.filtertext.length === 0) {
+				return this.content
+			}
+			return this.content.filter((p) => { return p.name.toLowerCase().includes(this.filtertext.toLowerCase()) })
+		},
 	},
 
 	beforeMount() {
@@ -81,6 +99,10 @@ export default {
 	},
 
 	methods: {
+		clearFilter() {
+			this.filtertext = ''
+		},
+
 		async getContent() {
 			const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
 			try {
@@ -102,7 +124,7 @@ export default {
 					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data) + '"')
 					target = res.data[0]
 				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ':' + t('groupsharemachine', 'no matching groups found for') + ' ' + target)
+					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for') + ' ' + target)
 					return
 				}
 			} catch (e) {
@@ -144,5 +166,15 @@ export default {
 	position: relative;
 	margin: 0.5rem 0;
 	row-gap: 0.5rem;
+}
+
+.widgetheaderdiv {
+	display: flex;
+	align-items: baseline;
+}
+
+.widgetheader {
+	white-space: nowrap;
+	padding-right: 2rem;
 }
 </style>
