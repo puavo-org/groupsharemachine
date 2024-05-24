@@ -1,5 +1,5 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: External Portal
+Upstream-Name: Group Share Machine
 Upstream-Contact: Tuomas Nurmi <dev@opinsys.fi>
 Source: https://github.com/nextcloud/profiler
 
@@ -8,5 +8,5 @@ Copyright: Tuomas Nurmi <dev@opinsys.fi>
 License: AGPL-3.0-or-later
 
 Files: l10n/*.js l10n/*.json
-Copyright: Nextcloud translators <https://www.transifex.com/nextcloud/>
+Copyright: Opinsys <dev@opinsys.fi>
 License: AGPL-3.0-or-later
