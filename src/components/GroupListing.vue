@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div v-if="content.length > 0">
+	<div v-if="canShare && content.length > 0">
 		<div class="widgetheaderdiv">
 			<h2 class="widgetheader">
 				{{ t('groupsharemachine', 'Share to a group') }}
