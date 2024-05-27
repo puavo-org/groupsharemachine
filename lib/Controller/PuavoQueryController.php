@@ -103,10 +103,24 @@ class PuavoQueryController extends Controller
         $response = curl_exec($ch);
         curl_close($ch);
         $userresponse = json_decode($response);
-        if($userresponse->error) {
+        if(isset($userresponse->error)) {
             return new DataResponse([ "error" => $userresponse->error->code ]);
         }
-        if(!in_array("teacher", $userresponse->roles) && !in_array("admin", $userresponse->roles)) {
+        /*if(!in_array("teacher", $userresponse->roles) && !in_array("admin", $userresponse->roles)) {
+            return new DataResponse([ "warning" => "not teacher, no buttons" ]);
+        }*/
+        $found = -1;
+        if(isset($userresponse->schools)) {
+            foreach($userresponse->schools as $thisSchool) {
+                foreach($thisSchool->groups as $thisGroup) {
+                    if ((stripos($thisGroup->name, "lehrer") !== false || stripos($thisGroup->abbreviation, "lehrer") !== false)) {
+                        $found = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if($found == -1) { // not teacher, show nothing
             return new DataResponse([ "warning" => "not teacher, no buttons" ]);
         }
 
