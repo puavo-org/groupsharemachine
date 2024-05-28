@@ -89,24 +89,35 @@ class PuavoQueryController extends Controller
         $apihost = $this->config->getAppValue(Application::APP_ID, 'apihost', 'demo.opinsys.fi');
         $credentials = $apiuser . ":" . $apipass;
         $ch = curl_init();
+        if ($ch === false) {
+            return new DataResponse([ "error" => "connection initialization problem" ]);
+        }
 
         $user = $this->userId;
-        //$user = "tuomasapi";
         if(ctype_digit($user)) {
             $user = "_by_id/" . $user;
         }
         $url = "https://api.opinsys.fi/v3/users/" . $user;
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
         $response = curl_exec($ch);
         curl_close($ch);
+        if ($response === false) {
+            return new DataResponse([ "error" => "connection problem" ]);
+        }
         $userresponse = json_decode($response);
+
         if(isset($userresponse->error)) {
             return new DataResponse([ "error" => $userresponse->error->code ]);
         }
-        /*if(!in_array("teacher", $userresponse->roles) && !in_array("admin", $userresponse->roles)) {
+
+        /////// Two alternative methods for checking if class button list should be displayed.
+        // The commented-out one is a bit cleaner, but the other one in use corresponds to the behaviour check added to nextcloud
+        // core, so using that ensures that there shouldn't be any surprising permission errors if a teacher/admin account does not
+        // belong to a teacher group
+        /*
+        if(!in_array("teacher", $userresponse->roles) && !in_array("admin", $userresponse->roles)) {
             return new DataResponse([ "warning" => "not teacher, no buttons" ]);
         }*/
         $found = -1;
@@ -123,16 +134,22 @@ class PuavoQueryController extends Controller
         if($found == -1) { // not teacher, show nothing
             return new DataResponse([ "warning" => "not teacher, no buttons" ]);
         }
+        ///////// End of class button list enablation check methods
 
         $primarySchool = $userresponse->primary_school_dn;
 
         $gurl = "https://api.opinsys.fi/v4/groups?filter=school_id|is|" . $primarySchool . "&fields=abbreviation,type,name,school_id";
         $ch2 = curl_init();
+        if ($ch2 === false) {
+            return new DataResponse([ "error" => "connection initialization problem" ]);
+        }
         curl_setopt($ch2, CURLOPT_URL, $gurl);
-        curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch2, CURLOPT_HTTPHEADER, array('Host: '. $apihost, "Authorization: Basic " . base64_encode($credentials)));
         $groupqueryreply = curl_exec($ch2);
+        if ($groupqueryreply === false) {
+            return new DataResponse([ "error" => "connection problem" ]);
+        }
         $gresponse = json_decode($groupqueryreply, true);
         curl_close($ch2);
 

@@ -110,8 +110,12 @@ export default {
 			const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
 			try {
 				const response = await axios.get(gurl)
-				this.content = this.content.concat(response.data[0])
-				console.debug('"' + JSON.stringify(response.data[0]) + '"')
+				if (response.data.length > 0) {
+				  this.content = this.content.concat(response.data[0])
+				  console.debug('"' + JSON.stringify(response.data[0]) + '"')
+				} else {
+				  console.debug('no groups, probably not a teacher (response ' + JSON.stringify(response.data) + ')')
+				}
 			} catch (error) {
 				console.debug(error)
 			}
