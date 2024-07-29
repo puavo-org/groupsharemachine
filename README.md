@@ -4,6 +4,13 @@ SPDX-License-Identifier: CC0-1.0
 -->
 
 # Group Share Machine
+
+A Nextcloud app that provides a list of one-click buttons for sharing files to different groups in Nextcloud sharing tab.
+The rationale is to allow teachers to share files with students in any class group, without being members of the class groups themselves. This is implemented
+with a Puavo integration that checks the account corresponding to logged in user from Puavo, and if it is a teacher, provides a list of classes
+in the teacher's school. Any usable functionality requires a Puavo instance, and Nextcloud accounts with usernames corresponding to Puavo usernames,
+or alternatively Puavo ids.
+
 Place this app in **nextcloud/apps/**
 
 ## Building the app
@@ -12,46 +19,9 @@ The app can be built by using the provided Makefile by running:
 
     make
 
-This requires the following things to be present:
-* make
-* which
-* tar: for building the archive
-* curl: used if phpunit and composer are not installed to fetch them from the web
-* npm: for building and testing everything JS, only required if a package.json is placed inside the **js/** folder
-
-The make command will install or update Composer dependencies if a composer.json is present and also **npm run build** if a package.json is present in the **js/** folder. The npm **build** script should use local paths for build systems and package managers, so people that simply want to build the app won't need to install npm libraries globally, e.g.:
-
-**package.json**:
-```json
-"scripts": {
-    "test": "node node_modules/gulp-cli/bin/gulp.js karma",
-    "prebuild": "npm install && node_modules/bower/bin/bower install && node_modules/bower/bin/bower update",
-    "build": "node node_modules/gulp-cli/bin/gulp.js"
-}
-```
-
-
-## Publish to App Store
-
-First get an account for the [App Store](http://apps.nextcloud.com/) then run:
+and a ready-for-server package with
 
     make && make appstore
 
-The archive is located in build/artifacts/appstore and can then be uploaded to the App Store.
-
-## Running tests
-You can use the provided Makefile to run all tests by using:
-
-    make test
-
-This will run the PHP unit and integration tests and if a package.json is present in the **js/** folder will execute **npm run test**
-
-Of course you can also install [PHPUnit](http://phpunit.de/getting-started.html) and use the configurations directly:
-
-    phpunit -c phpunit.xml
-
-or:
-
-    phpunit -c phpunit.integration.xml
-
-for integration tests
+One should refer to more complete and up-to-date sources (e.g. https://github.com/nextcloud/app_template) for any extra insight on Nextcloud app
+development and distribution.
