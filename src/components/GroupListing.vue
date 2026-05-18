@@ -10,159 +10,127 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 			</h2>
 			<NcTextField v-if="content.length > 3"
 				style="width: auto;"
-				:value.sync="filtertext"
+				v-model:value="filtertext"
 				:label="t('groupsharemachine', 'Filter groups')"
 				trailing-button-icon="close"
 				:show-trailing-button="filtertext !== ''"
-				@trailing-button-click="clearFilter">
-				<Magnify :size="18" />
-			</NcTextField>
+				@trailing-button-click="clearFilter" />
 		</div>
 		<div ref="newItem"
 			class="grid"
-			:title="t('groupsharemachine', 'Share to a group')"
-			:bold="false"
-			:force-display-actions="true">
+			:title="t('groupsharemachine', 'Share to a group')">
 			<NcButton v-for="item in sortedFilteredContent"
-				:key="item.abbreviation"
+				:key="item.id"
 				:aria-label="item.name"
-				:groupabbrv="item.abbreviation"
 				type="primary"
-				@click="shareContent(item.abbreviation)">
+				@click="shareContent(item.id)">
 				{{ item.name }}
 			</NcButton>
 		</div>
 	</div>
 </template>
 
-<script>
-import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
-import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'
-import Magnify from 'vue-material-design-icons/Magnify.vue'
+<script setup lang="ts">
+import { ref, computed, onBeforeMount } from 'vue'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcTextField from '@nextcloud/vue/components/NcTextField'
 import axios from '@nextcloud/axios'
 import { generateUrl, generateOcsUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
+import { t } from '@nextcloud/l10n'
 
-export default {
-	name: 'GroupListing',
-
-	components: {
-		NcButton,
-		NcTextField,
-		Magnify,
-	},
-
-	mixins: [
-	],
-
-	props: {
-		fileInfo: {
-			type: Object,
-			default: () => {},
-			required: true,
-		},
-	},
-	data() {
-		return {
-			filtertext: '',
-			loading: true,
-			content: [],
-		}
-	},
-
-	computed: {
-		getFullPath() { // From cfg_share_links/src/components/NewLink.vue
-			if (this.fileInfo) {
-				if (this.fileInfo.path.endsWith('/')) {
-					return this.fileInfo.path.concat(this.fileInfo.name)
-				} else {
-					return this.fileInfo.path.concat('/', this.fileInfo.name)
-				}
-			} else {
-				return 'None'
-			}
-		},
-		canShare() { // From cfg_share_links/src/components/NewLink.vue
-			return !!(this.fileInfo.permissions & OC.PERMISSION_SHARE)
-		},
-		sortedFilteredContent() {
-			return this.filteredContent.toSorted((a, b) => (a.name.toLowerCase().trim().localeCompare(b.name.toLowerCase().trim())))
-		},
-		filteredContent() {
-			if (this.filtertext.length === 0) {
-				return this.content
-			}
-			return this.content.filter((p) => { return p.name.toLowerCase().includes(this.filtertext.toLowerCase()) })
-		},
-	},
-
-	beforeMount() {
-		console.debug('preparing grouplisting')
-		this.getContent()
-	},
-
-	methods: {
-		clearFilter() {
-			this.filtertext = ''
-		},
-
-		async getContent() {
-			const gurl = generateUrl('/apps/groupsharemachine/puavoGroups')
-			try {
-				const response = await axios.get(gurl)
-				if (response.data.length > 0) {
-				  this.content = this.content.concat(response.data[0])
-				  console.debug('"' + JSON.stringify(response.data[0]) + '"')
-				} else {
-				  console.debug('no groups, probably not a teacher (response ' + JSON.stringify(response.data) + ')')
-				}
-			} catch (error) {
-				console.debug(error)
-			}
-			this.loading = false
-		},
-
-		async shareContent(target) {
-			const groupsearchUrl = generateUrl('/apps/groupsharemachine/searchNextcloudGroups/', 2) + target
-			try {
-				const res = await axios.get(groupsearchUrl)
-				console.debug('"' + JSON.stringify(res) + '"')
-				if (res.data.length > 0) {
-					console.debug('found possible matching groups, using first one: "' + JSON.stringify(res.data) + '"')
-					target = res.data[0]
-				} else {
-					showError(t('groupsharemachine', 'Failed to share') + ': ' + t('groupsharemachine', 'no matching groups found for {group}', { group: target }))
-					return
-				}
-			} catch (e) {
-				showError(t('groupsharemachine', 'Failed to search for group') + `: ${e.response?.request?.responseText ?? ''}`)
-				console.debug(e)
-				return
-			}
-
-			const values = {
-			  path: this.getFullPath,
-			  shareType: 1,
-			  permissions: 1,
-			  shareWith: target,
-			} // https://github.com/nextcloud/documentation/blob/master/developer_manual/client_apis/OCS/ocs-share-api.rst
-			const url = generateOcsUrl('apps/files_sharing/api/v1/shares', 2)
-			console.debug('"' + JSON.stringify(values) + '"')
-			try {
-				await axios.post(url, values)
-			} catch (e) {
-				showError(t('groupsharemachine', 'Failed to share') + `: ${e.response?.request?.responseText ?? ''}`)
-				console.debug(e)
-			}
-			showSuccess(t('groupsharemachine', 'Shared'))
-
-			const shareTab = OCA.Files.Sidebar.state.tabs.find(e => e.id === 'sharing')
-			if (shareTab) {
-				shareTab.update(this.fileInfo)
-			}
-		},
-	},
+interface GroupInfo {
+	id: string
+	name: string
 }
+
+interface FileInfo {
+	path: string
+	name: string
+	permissions: number
+}
+
+const props = defineProps<{
+	fileInfo: FileInfo
+}>()
+
+const filtertext = ref('')
+const content = ref<GroupInfo[]>([])
+
+const getFullPath = computed(() => {
+	if (props.fileInfo) {
+		if (props.fileInfo.path.endsWith('/')) {
+			return props.fileInfo.path + props.fileInfo.name
+		}
+		return props.fileInfo.path + '/' + props.fileInfo.name
+	}
+	return 'None'
+})
+
+const canShare = computed(() => {
+	return !!(props.fileInfo.permissions & OC.PERMISSION_SHARE)
+})
+
+const filteredContent = computed(() => {
+	if (filtertext.value.length === 0) {
+		return content.value
+	}
+	return content.value.filter((p) => p.name.toLowerCase().includes(filtertext.value.toLowerCase()))
+})
+
+const sortedFilteredContent = computed(() => {
+	return [...filteredContent.value].sort((a, b) =>
+		a.name.toLowerCase().trim().localeCompare(b.name.toLowerCase().trim()),
+	)
+})
+
+function clearFilter() {
+	filtertext.value = ''
+}
+
+async function getContent() {
+	const url = generateUrl('/apps/groupsharemachine/groups')
+	try {
+		const response = await axios.get<GroupInfo[]>(url)
+		if (response.data.length > 0) {
+			content.value = response.data
+			console.debug('GroupShareMachine: loaded ' + response.data.length + ' groups')
+		} else {
+			console.debug('GroupShareMachine: no groups (not a teacher or no class groups)')
+		}
+	} catch (error) {
+		console.debug(error)
+	}
+}
+
+async function shareContent(targetGroupId: string) {
+	const values = {
+		path: getFullPath.value,
+		shareType: 1,
+		permissions: 1,
+		shareWith: targetGroupId,
+	}
+	const url = generateOcsUrl('apps/files_sharing/api/v1/shares')
+	try {
+		await axios.post(url, values)
+	} catch (e: unknown) {
+		const error = e as { response?: { request?: { responseText?: string } } }
+		showError(t('groupsharemachine', 'Failed to share') + `: ${error.response?.request?.responseText ?? ''}`)
+		console.debug(e)
+		return
+	}
+	showSuccess(t('groupsharemachine', 'Shared'))
+
+	const shareTab = OCA.Files?.Sidebar?.state?.tabs?.find((tab: { id: string }) => tab.id === 'sharing')
+	if (shareTab) {
+		shareTab.update(props.fileInfo)
+	}
+}
+
+onBeforeMount(() => {
+	console.debug('GroupShareMachine: preparing grouplisting')
+	getContent()
+})
 </script>
 
 <style lang="scss" scoped>

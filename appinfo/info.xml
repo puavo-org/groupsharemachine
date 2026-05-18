@@ -2,20 +2,22 @@
 <info xmlns:xsi= "http://www.w3.org/2001/XMLSchema-instance"
       xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
     <!--
-    SPDX-FileCopyrightText: Tuomas Nurmi <dev@opinsys.fi>
+    SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
     SPDX-License-Identifier: CC0-1.0
     -->
     <id>groupsharemachine</id>
     <name>Group Share Machine</name>
-    <summary>Add buttons to share files to a list of external groups</summary>
-    <description><![CDATA[Add buttons to share files to a list of external groups.]]></description>
-    <version>0.0.1</version>
-    <licence>agpl</licence>
-    <author mail="dev@opinsys.fi" homepage="https://puavo.org">Tuomas Nurmi</author>
+    <summary>Quick-share files to class groups from the sharing sidebar</summary>
+    <description><![CDATA[Displays a grid of one-click share buttons in the file sharing sidebar so teachers can instantly share files with any class group. Groups are discovered from Nextcloud (class_ prefix) and the teacher role is checked via group membership (teachers_ prefix).]]></description>
+    <version>2.0.0</version>
+    <licence>AGPL-3.0-or-later</licence>
+    <author mail="dev@opinsys.fi" homepage="https://www.opinsys.fi">Opinsys Oy</author>
     <namespace>GroupShareMachine</namespace>
-    <category>files</category>
+    <category>integration</category>
+    <category>organization</category>
+    <category>tools</category>
     <bugs>https://github.com/puavo-org/groupsharemachine/issues</bugs>
     <dependencies>
-        <nextcloud min-version="27" max-version="30"/>
+        <nextcloud min-version="31" max-version="33"/>
     </dependencies>
 </info>
