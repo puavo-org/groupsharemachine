@@ -6,17 +6,14 @@ build_dir=$(CURDIR)/build
 sign_dir=$(build_dir)/sign
 cert_dir=$(HOME)/.nextcloud/certificates
 docker_container=master_nextcloud_1
+test_container=master_stable33_1
+container_app_path=/var/www/html/apps-shared/$(app_name)
 shared_dir=$(HOME)/dev/nextcloud/nextcloud-docker-dev/data/shared
 
 all: build
 
 .PHONY: build
-build: clean npm-build package
-
-.PHONY: npm-build
-npm-build:
-	npm ci
-	npm run build
+build: clean package
 
 .PHONY: package
 package:
@@ -24,8 +21,6 @@ package:
 	cp -r \
 		appinfo \
 		img \
-		js \
-		l10n \
 		lib \
 		LICENSE \
 		LICENSES \
@@ -49,6 +44,15 @@ sign: package
 	rm -rf $(shared_dir)/sign
 	tar czf $(build_dir)/$(app_name).tar.gz \
 		-C $(sign_dir) $(app_name)
+
+.PHONY: test
+test:
+	docker exec -u www-data $(test_container) bash -c \
+		"cd $(container_app_path) && vendor/bin/phpunit -c tests/phpunit.xml --no-coverage"
+
+.PHONY: psalm
+psalm:
+	composer psalm
 
 .PHONY: clean
 clean:

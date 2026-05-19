@@ -133,41 +133,58 @@ ncocc() { (cd ~/dev/nextcloud/nextcloud-docker-dev && docker-compose exec -u www
 # usage: ncocc stable33 app:list
 ```
 
-## 5. Build the frontend
+## 5. Configure sharing and run the sync
 
-From this repo:
-
-```bash
-npm ci
-npm run watch    # rebuilds on save
-```
-
-`npm run watch` writes the bundle to `js/`, which is mounted into the container via the symlink — refresh the browser to see changes. For one-off builds use `npm run build`.
-
-The Vite config (`vite.config.ts`) emits `groupsharemachine-groupsharemachine.mjs`, which is loaded by `lib/AppInfo/Application.php` on `LoadAdditionalScriptsEvent`.
-
-## 6. Create teacher and class test fixtures
-
-The app's business logic keys off two group prefixes (`teachers_` and `class_`) and an LDAP-synced `role` account property. For a pure-Nextcloud test (no LDAP):
+The app does nothing useful until two things are set up:
 
 ```bash
-ncocc stable33 group:add teachers_schoolA
-ncocc stable33 group:add class_1a
-ncocc stable33 group:add class_1b
-ncocc stable33 group:add class_2a
+# 1. Restrict group sharing to in-group members (the standard NC restriction).
+#    Teachers will bypass this via the custom group backend; everyone else stays constrained.
+ncocc stable33 config:app:set core shareapi_only_share_with_group_members --value=yes
 
-ncocc stable33 user:add --password-from-env teacher1 <<< 'password123'
-ncocc stable33 user:add --password-from-env student1 <<< 'password123'
-
-ncocc stable33 group:adduser teachers_schoolA teacher1
-ncocc stable33 group:adduser class_1a student1
+# 2. Populate the local class-group table from LDAP (otherwise it's empty until the background job fires).
+ncocc stable33 groupsharemachine:sync
 ```
 
-Log in as `teacher1` and open the Files sharing sidebar on any file — you should see one-click share buttons for `class_1a`, `class_1b`, `class_2a`. Log in as `student1` and the panel should be hidden entirely.
+`groupsharemachine:sync` walks LDAP via user_ldap's proxies and refreshes two tables:
+- `oc_groupsharemachine_groups` — gids whose `puavoEduGroupType` is in the allow-list
+- `oc_groupsharemachine_teachers` — uids whose multi-valued `puavoEduPersonAffiliation` contains `teacher`
 
-### Testing the LDAP role path
+Output looks like:
+```
+Groups:   seen=482 kept=37 pruned=0
+Teachers: seen=210 kept=18 pruned=0
+```
 
-If you want to exercise the `PROPERTY_ROLE === 'teacher'` branch in `GroupQueryController::isTeacher()`, start the `ldap` service (`docker compose up -d ldap`), bind it via the LDAP app, and set `puavoedupersonaffiliation: teacher` on the user. With no LDAP, group-prefix membership is the only way the user is detected as a teacher.
+A `TimedJob` runs the same sync every 15 minutes.
+
+## 6. Test fixtures (with LDAP)
+
+The app relies on real LDAP-synced users and groups — there's no pure-Nextcloud fallback for teacher detection or group typing.
+
+Bring up the `ldap` service from `nextcloud-docker-dev` and bind it via the LDAP admin UI:
+
+```bash
+docker-compose up -d ldap
+```
+
+Then in the Nextcloud admin → LDAP / AD integration, configure:
+- A user filter that includes test accounts with `puavoEduPersonAffiliation` populated
+- A group filter that includes groups with `puavoEduGroupType=year class` or `puavoEduGroupType=teaching_group`
+- Set Advanced → Directory Settings → **Base Group Tree** and **Group-Member association** (`memberUid` for `posixGroup`)
+
+You do **not** need to configure a Role Field — the app reads `puavoEduPersonAffiliation` directly from LDAP (it's multi-valued and would be flattened by the Role Field mapping).
+
+Verify by inspecting our tables:
+
+```bash
+docker exec -t master_database-mysql_1 mysql -uroot -pnextcloud stable33 -e "
+  SELECT * FROM oc_groupsharemachine_groups;
+  SELECT * FROM oc_groupsharemachine_teachers;
+"
+```
+
+Then log in as a teacher, open file sharing, and type a class group name into the native share dialog — the group should appear and the share should succeed. Log in as a student, try sharing to a different class group — it should be rejected.
 
 ## 7. Xdebug
 
@@ -200,12 +217,18 @@ Run from this repo on the host (uses `composer-bin-plugin` to install isolated t
 composer install               # installs tools on post-install
 composer cs:check              # php-cs-fixer dry run
 composer cs:fix                # apply fixes
-composer psalm                 # strict static analysis
+composer psalm                 # strict static analysis  (or: make psalm)
 composer rector                # apply rector rules, then cs:fix
-composer test:unit             # phpunit (when tests exist)
+make test                      # phpunit inside the stable33 container
 ```
 
-`composer psalm` runs at `errorLevel="1"` with `findUnusedCode` enabled — expect zero issues on this branch.
+`composer psalm` runs at the configured `errorLevel` — expect zero errors on this branch.
+
+`make test` shells into `master_stable33_1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
+
+```bash
+make test test_container=master_stable32_1
+```
 
 ## 9. Building a release tarball
 
@@ -222,11 +245,13 @@ make sign docker_container=nextcloud-docker-dev_stable33_1
 
 ## Troubleshooting
 
-**App not visible in `app:list`** — the symlink target must be absolute and readable. Symlinks pointing into `$HOME` are fine; relative symlinks are not. Verify with `docker compose exec stable33 readlink -f /var/www/html/apps-shared/groupsharemachine`.
+**App not visible in `app:list`** — the bind mount must point to a real directory. See section 2 about `docker-compose.override.yml`.
 
 **`Class OCA\GroupShareMachine\... not found`** — `composer install` was not run in this repo, or `appinfo/info.xml` declares a namespace that doesn't match the PSR-4 autoload entry. Check `composer.json` and run `composer dump-autoload`.
 
-**Vite bundle not loaded in the browser** — `Application.php` registers `groupsharemachine-groupsharemachine`; if you renamed the entry in `vite.config.ts`, update the `Util::addScript()` call to match.
+**Teacher sees no class groups in the share picker** — Run `occ groupsharemachine:diagnose <uid> <gid>`. It tells you whether the user is in the teachers table, whether the group is in the groups table, and what the backend would do. If either table is empty, run `occ groupsharemachine:sync`; if it still misses entries, check that user_ldap's Base User / Group Tree and Group-Member association are set, and that `puavoEduPersonAffiliation` / `puavoEduGroupType` exist on the corresponding LDAP entries.
+
+**Share fails with "Sharing is only allowed within your own groups"** — Confirm `shareapi_only_share_with_group_members` is `yes`, then run `groupsharemachine:diagnose` for the (user, group) pair. `virtualised by this app: NO` means the backend is correctly choosing not to bypass the restriction (user not a teacher, or group not a class). `virtualised by this app: YES` but the share still fails means the share check uses a different code path — file a bug.
 
 **`Permission denied` writing to `data/shared/sign`** — the dev container runs as `www-data` (uid 33). The `make sign` recipe `chmod -R a+rwX`'s the sign dir before invoking `occ`; if you ran it once as root the leftover files may need `sudo rm -rf data/shared/sign` to clean up.
 

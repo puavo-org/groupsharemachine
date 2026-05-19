@@ -7,8 +7,12 @@
     -->
     <id>groupsharemachine</id>
     <name>Group Share Machine</name>
-    <summary>Quick-share files to class groups from the sharing sidebar</summary>
-    <description><![CDATA[Displays a grid of one-click share buttons in the file sharing sidebar so teachers can instantly share files with any class group. Groups are discovered from Nextcloud (class_ prefix) and the teacher role is checked via group membership (teachers_ prefix).]]></description>
+    <summary>Puavo-specific: let teachers share files to class groups through the native sharing UI</summary>
+    <description><![CDATA[
+Puavo-specific Nextcloud app. Lets teachers share files with class groups via Nextcloud's standard share dialog, including from the mobile and desktop clients. Teachers are identified by the LDAP-synced role attribute (puavoEduPersonAffiliation = teacher); class groups are recognised by their puavoEduGroupType value (year class, teaching_group).
+
+This app is only useful in deployments that synchronise from a Puavo LDAP instance via user_ldap, with the puavoEdu* schema in place. It is not a general-purpose sharing helper.
+    ]]></description>
     <version>2.0.0</version>
     <licence>AGPL-3.0-or-later</licence>
     <author mail="dev@opinsys.fi" homepage="https://www.opinsys.fi">Opinsys Oy</author>
@@ -20,4 +24,11 @@
     <dependencies>
         <nextcloud min-version="31" max-version="33"/>
     </dependencies>
+    <background-jobs>
+        <job>OCA\GroupShareMachine\BackgroundJob\SyncGroupTypesJob</job>
+    </background-jobs>
+    <commands>
+        <command>OCA\GroupShareMachine\Command\SyncGroupTypesCommand</command>
+        <command>OCA\GroupShareMachine\Command\DiagnoseCommand</command>
+    </commands>
 </info>

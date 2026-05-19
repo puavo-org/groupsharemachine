@@ -5,92 +5,63 @@ SPDX-License-Identifier: CC0-1.0
 
 # Group Share Machine
 
-A Nextcloud app that displays a grid of one-click share buttons in the file sharing sidebar so teachers can instantly share files with any class group. Teachers are identified by membership in groups with the `teachers_` prefix. Class groups are discovered from Nextcloud groups with the `class_` prefix.
+> **Puavo-specific.** This app is only useful in deployments that synchronise users and groups from a [Puavo](https://github.com/puavo-org) LDAP instance via `user_ldap`, with the `puavoEdu*` schema (`puavoEduPersonAffiliation` on users, `puavoEduGroupType` on groups). It is not a general-purpose sharing helper.
+
+A Nextcloud app that lets teachers share files to class groups through Nextcloud's **native** sharing dialog — including from the mobile and desktop clients. It does this by virtualising teacher membership in class-like groups so the standard share check passes, without weakening Nextcloud's "only share with group members" restriction for everyone else.
 
 ## How it works
 
-The app adds a panel to the file sharing sidebar with one-click share buttons for class groups.
+1. The admin enables `shareapi_only_share_with_group_members` (default off in Nextcloud). With that on, normal users can only share to groups they're a member of.
+2. A background job walks LDAP via `user_ldap`'s proxies and refreshes two local tables:
+   - `oc_groupsharemachine_groups` — gids whose `puavoEduGroupType` is `year class` or `teaching_group`
+   - `oc_groupsharemachine_teachers` — uids whose multi-valued `puavoEduPersonAffiliation` includes the value `teacher`
+3. A custom group backend then reports, for every recorded class group, that any recorded teacher is a member — but only for sharing checks. The class groups do **not** show up in the teacher's group list and the teacher does **not** auto-receive shares directed at them.
 
-- **Teacher detection**: The current user must belong to at least one Nextcloud group with the `teachers_` prefix (e.g. `teachers_schoolA`). Users without such membership see nothing.
-- **Group discovery**: All Nextcloud groups with the `class_` prefix (e.g. `class_1a`) are shown as share buttons.
-- **Sharing**: Clicking a button shares the file read-only to that group using the standard Nextcloud sharing API.
+The net effect: teachers can pick any class group from the native sharee picker and share to it; students still can't share outside their own groups; the mobile and desktop clients work without any app-specific UI.
 
-## Testing
-
-Create test groups and users via `occ`:
-
-```bash
-# Teacher group
-occ group:add teachers_schoolA
-
-# Class groups
-occ group:add class_1a
-occ group:add class_1b
-occ group:add class_2a
-
-# Users
-occ user:add teacher1
-occ user:add student1
-occ user:add student2
-
-# Assign memberships
-occ group:addmember teachers_schoolA teacher1
-occ group:addmember class_1a student1
-occ group:addmember class_1a student2
-occ group:addmember class_1b student2
-```
-
-Expected behavior:
-- `teacher1` opens file sharing sidebar and sees buttons for Class 1A, 1B, 2A
-- `student1` or any user not in a `teachers_` group sees nothing
+Reading `puavoEduPersonAffiliation` directly (rather than via Nextcloud's `role` account property) is intentional — that attribute is multi-valued in puavo LDAP and `user_ldap` flattens it during sync, so an `admin` + `teacher` user could end up classified as `admin` only and lose their teacher status.
 
 ## Requirements
 
-- Nextcloud 31 or 32
+- Nextcloud 31, 32, or 33
 - PHP 8.1+
-- Node.js 20+
+- A **Puavo** LDAP instance, reachable from Nextcloud
+- `user_ldap` enabled and bound against that Puavo LDAP — without this the app has nothing to read and `occ groupsharemachine:sync` reports `seen=0`
+- The `puavoEduPersonAffiliation` and `puavoEduGroupType` attributes are readable by the user_ldap bind agent (the app reads them on demand via user_ldap's connection — no extra LDAP credentials needed)
+- Groups in LDAP have `puavoEduGroupType` set to `year class` or `teaching_group` for the classes teachers should be allowed to share to
+- The admin setting **Sharing → Restrict users to only share with users in their groups** turned on (or `occ config:app:set core shareapi_only_share_with_group_members --value=yes`) — without this the restriction the app bypasses doesn't exist in the first place
 
-## Building the app
-
-Install dependencies and build:
-
-```bash
-npm install
-npm run build
-```
-
-For development with file watching:
+## Setup
 
 ```bash
-npm run watch
+# enable the app
+occ app:enable groupsharemachine
+
+# turn on the standard restriction so non-teachers stay constrained
+occ config:app:set core shareapi_only_share_with_group_members --value=yes
+
+# do an initial group-type sync (otherwise it runs every 15 minutes)
+occ groupsharemachine:sync
 ```
 
-## Linting
+`occ groupsharemachine:sync` reports something like `seen=482 kept=37 pruned=0`.
 
-```bash
-npm run lint
-npm run stylelint
-composer cs:check
-composer psalm
-```
+## Testing
+
+Pre-requisite: a Puavo LDAP populated with at least one teacher (`puavoEduPersonAffiliation` containing `teacher`) and one class group (`puavoEduGroupType` set to `year class` or `teaching_group`).
+
+1. Run `occ groupsharemachine:sync` — expect non-zero `kept` for both groups and teachers.
+2. `occ groupsharemachine:diagnose <teacher-uid> <class-gid>` — `virtualised by this app: YES` confirms the wiring.
+3. Log in as a teacher, open any file's sharing sidebar, type a class group name. The group should appear in the autocomplete and the share should succeed.
+4. Log in as a student, try sharing to a different class group — it should be rejected with "Sharing is only allowed within your own groups".
+
+## How it works internally
+
+For a deeper walkthrough of the runtime flow, the two custom tables (`oc_groupsharemachine_groups`, `oc_groupsharemachine_teachers`), how they relate to Nextcloud and `user_ldap` tables, and which Nextcloud APIs the app extends, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Releasing a new version
 
-1. Update the version in `appinfo/info.xml` and `package.json`
-2. Commit and tag the release:
-   ```bash
-   git add appinfo/info.xml package.json
-   git commit -m "vx.x.x"
-   git tag vx.x.x
-   git push && git push --tags
-   ```
-3. Build and sign the appstore package:
-   ```bash
-   make sign
-   ```
-   This uses `docker exec` to run `occ integrity:sign-app` inside the
-   `master_nextcloud_1` container. Signing certificates must be placed in
-   `~/.nextcloud/certificates/` (`groupsharemachine.key` and `groupsharemachine.crt`).
-
-   To build without signing, run `make` instead.
+1. Update the version in `appinfo/info.xml`
+2. Commit and tag: `git commit -m "vx.x.x" && git tag vx.x.x && git push && git push --tags`
+3. Build and sign the appstore package: `make sign` (requires certs in `~/.nextcloud/certificates/`)
 4. Upload `build/groupsharemachine.tar.gz` to the [Nextcloud App Store](https://apps.nextcloud.com/developer/apps/releases/new)

@@ -1,6 +1,6 @@
 {
 	"name": "nextcloud/groupsharemachine",
-	"description": "Quick-share files to class groups from the sharing sidebar",
+	"description": "Let teachers share files to class groups through the native sharing UI",
 	"license": "AGPL-3.0-or-later",
 	"authors": [
 		{
@@ -12,6 +12,11 @@
 	"autoload": {
 		"psr-4": {
 			"OCA\\GroupShareMachine\\": "lib/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"OCA\\GroupShareMachine\\Tests\\": "tests/"
 		}
 	},
 	"scripts": {
@@ -26,7 +31,6 @@
 		"cs:fix": "php-cs-fixer fix",
 		"psalm": "psalm --threads=1 --no-cache",
 		"test:unit": "phpunit tests -c tests/phpunit.xml --colors=always --fail-on-warning --fail-on-risky",
-		"openapi": "generate-spec",
 		"rector": "rector && composer cs:fix"
 	},
 	"require": {
