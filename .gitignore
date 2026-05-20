@@ -1,5 +1,6 @@
 /.idea/
 /*.iml
+/.claude/
 
 /vendor/
 /vendor-bin/*/vendor/

@@ -136,7 +136,7 @@ class LdapSyncTest extends TestCase {
 	public function testProxyAbsentBecomesNoOp(): void {
 		// When user_ldap isn't installed, resolveProxy returns null and we
 		// shouldn't write anything to the tables.
-		$sync = new class ($this->groupMapper, $this->teacherMapper, new NullLogger()) extends LdapSync {
+		$sync = new class($this->groupMapper, $this->teacherMapper, new NullLogger()) extends LdapSync {
 			protected function resolveProxy(string $class): ?object {
 				return null;
 			}
@@ -167,7 +167,7 @@ class LdapSyncTest extends TestCase {
 	 * @param array<string, list<string>> $users
 	 */
 	private function makeSync(array $groups, array $users): LdapSync {
-		$access = new class ($groups, $users) {
+		$access = new class($groups, $users) {
 			/**
 			 * @param array<string, list<string>> $groups
 			 * @param array<string, list<string>> $users
@@ -210,11 +210,14 @@ class LdapSyncTest extends TestCase {
 			}
 		};
 
-		$groupProxy = new class (array_keys($groups), $access) {
+		$groupProxy = new class(array_keys($groups), $access) {
 			/**
 			 * @param list<string> $gids
 			 */
-			public function __construct(private array $gids, private object $access) {
+			public function __construct(
+				private array $gids,
+				private object $access,
+			) {
 			}
 
 			/**
@@ -229,11 +232,14 @@ class LdapSyncTest extends TestCase {
 			}
 		};
 
-		$userProxy = new class (array_keys($users), $access) {
+		$userProxy = new class(array_keys($users), $access) {
 			/**
 			 * @param list<string> $uids
 			 */
-			public function __construct(private array $uids, private object $access) {
+			public function __construct(
+				private array $uids,
+				private object $access,
+			) {
 			}
 
 			/**
@@ -248,7 +254,7 @@ class LdapSyncTest extends TestCase {
 			}
 		};
 
-		return new class ($this->groupMapper, $this->teacherMapper, new NullLogger(), $groupProxy, $userProxy) extends LdapSync {
+		return new class($this->groupMapper, $this->teacherMapper, new NullLogger(), $groupProxy, $userProxy) extends LdapSync {
 			public function __construct(
 				ClassGroupMapper $groupMapper,
 				TeacherMapper $teacherMapper,

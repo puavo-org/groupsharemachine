@@ -13,7 +13,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class SyncGroupTypesCommand extends Command {
 
-	public function __construct(private LdapSync $sync) {
+	public function __construct(
+		private LdapSync $sync,
+	) {
 		parent::__construct();
 	}
 
