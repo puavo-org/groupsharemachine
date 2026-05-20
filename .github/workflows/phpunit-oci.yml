@@ -17,12 +17,17 @@ env:
 
 jobs:
   phpunit-oci:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
-        php-versions: ['8.0']
-        server-versions: ['master']
+        include:
+          - php-versions: '8.1'
+            server-versions: stable31
+          - php-versions: '8.1'
+            server-versions: stable32
+          - php-versions: '8.2'
+            server-versions: stable33
 
     services:
       oracle:
@@ -37,14 +42,14 @@ jobs:
           echo "APP_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Checkout server
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: true
           repository: nextcloud/server
           ref: ${{ matrix.server-versions }}
 
       - name: Checkout app
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: apps/${{ env.APP_NAME }}
 
@@ -78,7 +83,7 @@ jobs:
         # Only run if phpunit config file exists
         if: steps.check_phpunit.outputs.files_exists == 'true'
         working-directory: apps/${{ env.APP_NAME }}
-        run: ./vendor/phpunit/phpunit/phpunit -c ${{ env.PHPUNIT_CONFIG }}
+        run: ./vendor/bin/phpunit -c ${{ env.PHPUNIT_CONFIG }}
 
       - name: Check PHPUnit integration config file existence
         id: check_integration
@@ -95,7 +100,7 @@ jobs:
         # Only run if phpunit integration config file exists
         if: steps.check_integration.outputs.files_exists == 'true'
         working-directory: apps/${{ env.APP_NAME }}
-        run: ./vendor/phpunit/phpunit/phpunit -c ${{ env.PHPUNIT_INTEGRATION_CONFIG }}
+        run: ./vendor/bin/phpunit -c ${{ env.PHPUNIT_INTEGRATION_CONFIG }}
 
   summary:
     runs-on: ubuntu-latest
