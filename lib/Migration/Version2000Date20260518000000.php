@@ -28,7 +28,7 @@ class Version2000Date20260518000000 extends SimpleMigrationStep {
 				'notnull' => true,
 				'length' => 64,
 			]);
-			$table->setPrimaryKey(['gid']);
+			$table->setPrimaryKey(['gid'], 'gsm_groups_pk');
 			$table->addIndex(['group_type'], 'gsm_groups_type_idx');
 		}
 
@@ -38,7 +38,7 @@ class Version2000Date20260518000000 extends SimpleMigrationStep {
 				'notnull' => true,
 				'length' => 64,
 			]);
-			$table->setPrimaryKey(['uid']);
+			$table->setPrimaryKey(['uid'], 'gsm_teachers_pk');
 		}
 
 		return $schema;

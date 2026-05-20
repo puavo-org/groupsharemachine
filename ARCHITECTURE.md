@@ -94,7 +94,7 @@ Both live in Nextcloud's main database, both have the `oc_` prefix applied by NC
 CREATE TABLE groupsharemachine_groups (
     gid         VARCHAR(64) NOT NULL,    -- Nextcloud gid (= user_ldap owncloud_name)
     group_type  VARCHAR(64) NOT NULL,    -- 'year class' | 'teaching_group'
-    PRIMARY KEY (gid),
+    CONSTRAINT gsm_groups_pk PRIMARY KEY (gid),
     INDEX gsm_groups_type_idx (group_type)
 );
 ```
@@ -106,7 +106,7 @@ One row per LDAP group whose `puavoEduGroupType` is in the allow-list. The `gid`
 ```sql
 CREATE TABLE groupsharemachine_teachers (
     uid  VARCHAR(64) NOT NULL,           -- Nextcloud uid (= user_ldap owncloud_name)
-    PRIMARY KEY (uid)
+    CONSTRAINT gsm_teachers_pk PRIMARY KEY (uid)
 );
 ```
 
