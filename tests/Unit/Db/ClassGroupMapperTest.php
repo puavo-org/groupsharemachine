@@ -51,7 +51,7 @@ class ClassGroupMapperTest extends TestCase {
 			->select('group_type')
 			->from(ClassGroupMapper::TABLE)
 			->executeQuery()
-			->fetchAssociative();
+			->fetch();
 		$this->assertSame('teaching_group', $row['group_type']);
 	}
 
