@@ -12,7 +12,19 @@ use OCP\DB\Types;
 use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
-class Version2000Date20260518000000 extends SimpleMigrationStep {
+/**
+ * Initial schema for groupsharemachine v1.0.0.
+ *
+ *  - groupsharemachine_groups (gid PK):
+ *      class groups whose puavoEduGroupType is in the allow-list, with their
+ *      school name (for picker display) and school DN (for scoping).
+ *
+ *  - groupsharemachine_teachers ((uid, school_dn) composite PK):
+ *      one row per (teacher, school) authorisation pair. Teachers in multiple
+ *      schools have multiple rows; the per-school check is enforced by the
+ *      group backend.
+ */
+class Version1000Date20260521000000 extends SimpleMigrationStep {
 
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
 		/** @var ISchemaWrapper $schema */
@@ -28,6 +40,14 @@ class Version2000Date20260518000000 extends SimpleMigrationStep {
 				'notnull' => true,
 				'length' => 64,
 			]);
+			$table->addColumn('school_name', Types::STRING, [
+				'notnull' => false,
+				'length' => 128,
+			]);
+			$table->addColumn('school_dn', Types::STRING, [
+				'notnull' => false,
+				'length' => 256,
+			]);
 			$table->setPrimaryKey(['gid'], 'gsm_groups_pk');
 			$table->addIndex(['group_type'], 'gsm_groups_type_idx');
 		}
@@ -38,7 +58,11 @@ class Version2000Date20260518000000 extends SimpleMigrationStep {
 				'notnull' => true,
 				'length' => 64,
 			]);
-			$table->setPrimaryKey(['uid'], 'gsm_teachers_pk');
+			$table->addColumn('school_dn', Types::STRING, [
+				'notnull' => true,
+				'length' => 256,
+			]);
+			$table->setPrimaryKey(['uid', 'school_dn'], 'gsm_teachers_pk');
 		}
 
 		return $schema;

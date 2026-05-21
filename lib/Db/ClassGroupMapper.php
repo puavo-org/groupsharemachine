@@ -80,12 +80,108 @@ class ClassGroupMapper extends QBMapper {
 		return $gids;
 	}
 
-	public function upsert(string $gid, string $groupType): void {
+	/**
+	 * Substring-match search returning gid + school metadata. Used by the
+	 * picker plugin to render labels with school disambiguation.
+	 *
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 */
+	public function searchEntries(string $search, int $limit, int $offset): array {
+		return $this->searchEntriesInner($search, null, $limit, $offset);
+	}
+
+	/**
+	 * Same as searchEntries, but restricted to class groups whose school_dn
+	 * is in $schoolDns. Used by the picker to enforce per-school scoping.
+	 *
+	 * @param list<string> $schoolDns
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 */
+	public function searchEntriesForSchools(string $search, array $schoolDns, int $limit, int $offset): array {
+		if ($schoolDns === []) {
+			return [];
+		}
+		return $this->searchEntriesInner($search, $schoolDns, $limit, $offset);
+	}
+
+	/**
+	 * @param ?list<string> $schoolDns null = unrestricted
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 */
+	private function searchEntriesInner(string $search, ?array $schoolDns, int $limit, int $offset): array {
 		$qb = $this->db->getQueryBuilder();
-		$updated = $qb->update(self::TABLE)
+		$qb->select('gid', 'school_name', 'school_dn')->from(self::TABLE);
+		if ($search !== '') {
+			$qb->where($qb->expr()->iLike(
+				'gid',
+				$qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%'),
+			));
+		}
+		if ($schoolDns !== null) {
+			$qb->andWhere($qb->expr()->in(
+				'school_dn',
+				$qb->createNamedParameter($schoolDns, IQueryBuilder::PARAM_STR_ARRAY),
+			));
+		}
+		$qb->orderBy('gid')
+			->setMaxResults($limit > 0 ? $limit : 200)
+			->setFirstResult($offset);
+
+		$result = $qb->executeQuery();
+		$entries = [];
+		while (($row = $result->fetch()) !== false) {
+			$school = $row['school_name'] ?? null;
+			$entries[] = [
+				'gid' => (string)$row['gid'],
+				'school_name' => $school === null ? null : (string)$school,
+				'school_dn' => (string)($row['school_dn'] ?? ''),
+			];
+		}
+		$result->closeCursor();
+
+		return $entries;
+	}
+
+	public function getSchoolName(string $gid): ?string {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('school_name')
+			->from(self::TABLE)
+			->where($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
+
+		$result = $qb->executeQuery();
+		$value = $result->fetchOne();
+		$result->closeCursor();
+
+		if ($value === false || $value === null) {
+			return null;
+		}
+		return (string)$value;
+	}
+
+	public function getSchoolDn(string $gid): ?string {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('school_dn')
+			->from(self::TABLE)
+			->where($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
+
+		$result = $qb->executeQuery();
+		$value = $result->fetchOne();
+		$result->closeCursor();
+
+		if ($value === false || $value === null || $value === '') {
+			return null;
+		}
+		return (string)$value;
+	}
+
+	public function upsert(string $gid, string $groupType, ?string $schoolName = null, string $schoolDn = ''): void {
+		$qb = $this->db->getQueryBuilder();
+		$update = $qb->update(self::TABLE)
 			->set('group_type', $qb->createNamedParameter($groupType))
-			->where($qb->expr()->eq('gid', $qb->createNamedParameter($gid)))
-			->executeStatement();
+			->set('school_name', $qb->createNamedParameter($schoolName))
+			->set('school_dn', $qb->createNamedParameter($schoolDn))
+			->where($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
+		$updated = $update->executeStatement();
 
 		if ($updated === 0) {
 			$insert = $this->db->getQueryBuilder();
@@ -93,6 +189,8 @@ class ClassGroupMapper extends QBMapper {
 				->values([
 					'gid' => $insert->createNamedParameter($gid),
 					'group_type' => $insert->createNamedParameter($groupType),
+					'school_name' => $insert->createNamedParameter($schoolName),
+					'school_dn' => $insert->createNamedParameter($schoolDn),
 				])
 				->executeStatement();
 		}

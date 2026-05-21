@@ -25,24 +25,35 @@ class TeacherClassMembershipTest extends TestCase {
 		$this->backend = new TeacherClassMembership($this->groupMapper, $this->teacherMapper);
 	}
 
-	public function testInGroupTrueOnlyWhenBothTablesContain(): void {
-		$this->groupMapper->method('contains')->with('class_1a')->willReturn(true);
-		$this->teacherMapper->method('contains')->with('alice')->willReturn(true);
+	public function testInGroupTrueWhenTeacherInGroupsSchool(): void {
+		$schoolA = 'puavoId=1,ou=Groups';
+		$this->groupMapper->method('getSchoolDn')->with('class_1a')->willReturn($schoolA);
+		$this->teacherMapper->method('belongsToSchool')->with('alice', $schoolA)->willReturn(true);
 
 		$this->assertTrue($this->backend->inGroup('alice', 'class_1a'));
 	}
 
-	public function testInGroupFalseWhenGroupMissing(): void {
-		$this->groupMapper->method('contains')->with('not_a_class')->willReturn(false);
-		// teacherMapper should not even be consulted — short-circuit on group
-		$this->teacherMapper->expects($this->never())->method('contains');
+	public function testInGroupFalseWhenGroupHasNoSchool(): void {
+		$this->groupMapper->method('getSchoolDn')->with('not_a_class')->willReturn(null);
+		// teacherMapper should not be consulted — short-circuit when no school
+		$this->teacherMapper->expects($this->never())->method('belongsToSchool');
 
 		$this->assertFalse($this->backend->inGroup('alice', 'not_a_class'));
 	}
 
+	public function testInGroupFalseWhenTeacherInDifferentSchool(): void {
+		$schoolA = 'puavoId=1,ou=Groups';
+		$this->groupMapper->method('getSchoolDn')->with('class_1a')->willReturn($schoolA);
+		// teacher exists but not in school A
+		$this->teacherMapper->method('belongsToSchool')->with('alice', $schoolA)->willReturn(false);
+
+		$this->assertFalse($this->backend->inGroup('alice', 'class_1a'));
+	}
+
 	public function testInGroupFalseWhenUserNotTeacher(): void {
-		$this->groupMapper->method('contains')->with('class_1a')->willReturn(true);
-		$this->teacherMapper->method('contains')->with('student1')->willReturn(false);
+		$schoolA = 'puavoId=1,ou=Groups';
+		$this->groupMapper->method('getSchoolDn')->with('class_1a')->willReturn($schoolA);
+		$this->teacherMapper->method('belongsToSchool')->with('student1', $schoolA)->willReturn(false);
 
 		$this->assertFalse($this->backend->inGroup('student1', 'class_1a'));
 	}
@@ -57,7 +68,7 @@ class TeacherClassMembershipTest extends TestCase {
 
 	public function testGetUserGroupsAlwaysEmpty(): void {
 		// Even when the user is a known teacher, we deliberately return [].
-		$this->teacherMapper->method('contains')->willReturn(true);
+		$this->teacherMapper->method('belongsToSchool')->willReturn(true);
 
 		$this->assertSame([], $this->backend->getUserGroups('any_teacher'));
 	}

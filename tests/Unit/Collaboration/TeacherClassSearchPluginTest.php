@@ -46,20 +46,20 @@ class TeacherClassSearchPluginTest extends TestCase {
 
 	public function testNoContributionWhenLoggedOut(): void {
 		$this->userSession->method('getUser')->willReturn(null);
-		$this->teacherMapper->expects($this->never())->method('contains');
-		$this->groupMapper->expects($this->never())->method('searchGids');
+		$this->teacherMapper->expects($this->never())->method('schoolsForTeacher');
+		$this->groupMapper->expects($this->never())->method('searchEntriesForSchools');
 		$this->searchResult->expects($this->never())->method('addResultSet');
 
 		$this->assertFalse($this->plugin->search('nct', 100, 0, $this->searchResult));
 	}
 
-	public function testNoContributionWhenNotTeacher(): void {
+	public function testNoContributionWhenNotTeacherInAnySchool(): void {
 		$user = $this->createMock(IUser::class);
 		$user->method('getUID')->willReturn('student1');
 		$this->userSession->method('getUser')->willReturn($user);
-		$this->teacherMapper->method('contains')->with('student1')->willReturn(false);
+		$this->teacherMapper->method('schoolsForTeacher')->with('student1')->willReturn([]);
 
-		$this->groupMapper->expects($this->never())->method('searchGids');
+		$this->groupMapper->expects($this->never())->method('searchEntriesForSchools');
 		$this->searchResult->expects($this->never())->method('addResultSet');
 
 		$this->assertFalse($this->plugin->search('nct', 100, 0, $this->searchResult));
@@ -69,11 +69,13 @@ class TeacherClassSearchPluginTest extends TestCase {
 		$teacher = $this->createMock(IUser::class);
 		$teacher->method('getUID')->willReturn('alice');
 		$this->userSession->method('getUser')->willReturn($teacher);
-		$this->teacherMapper->method('contains')->with('alice')->willReturn(true);
+		$this->teacherMapper->method('schoolsForTeacher')->with('alice')->willReturn(['puavoId=1,ou=Groups']);
 
-		$this->groupMapper->method('searchGids')
-			->with('nct', 100, 0)
-			->willReturn(['nct-2024', 'nct-2025']);
+		$this->groupMapper->method('searchEntriesForSchools')
+			->willReturn([
+				['gid' => 'nct-2024', 'school_name' => null],
+				['gid' => 'nct-2025', 'school_name' => null],
+			]);
 
 		$g1 = $this->mockGroup('NCT - 1.luokka');
 		$g2 = $this->mockGroup('NCT - 2.luokka');
@@ -99,13 +101,78 @@ class TeacherClassSearchPluginTest extends TestCase {
 		$this->assertFalse($this->plugin->search('nct', 100, 0, $this->searchResult));
 	}
 
+	public function testLabelDisambiguatedWithSchoolName(): void {
+		// Two class groups with the same display name across two schools — the
+		// labels in the picker should be disambiguated with the school suffix.
+		$teacher = $this->createMock(IUser::class);
+		$teacher->method('getUID')->willReturn('alice');
+		$this->userSession->method('getUser')->willReturn($teacher);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
+
+		$this->groupMapper->method('searchEntriesForSchools')->willReturn([
+			['gid' => 'school_a_1a', 'school_name' => 'Nextcloud testikoulu'],
+			['gid' => 'school_b_1a', 'school_name' => 'Helsingin yläaste'],
+		]);
+
+		$this->groupManager->method('get')->willReturnMap([
+			['school_a_1a', $this->mockGroup('1.luokka')],
+			['school_b_1a', $this->mockGroup('1.luokka')],
+		]);
+		$this->searchResult->method('hasResult')->willReturn(false);
+
+		$this->searchResult->expects($this->once())
+			->method('addResultSet')
+			->with(
+				$this->isInstanceOf(SearchResultType::class),
+				$this->callback(static function (array $wide): bool {
+					$labels = array_map(static fn (array $e): string => $e['label'], $wide);
+					sort($labels);
+					return $labels === [
+						'1.luokka (Helsingin yläaste)',
+						'1.luokka (Nextcloud testikoulu)',
+					];
+				}),
+				[],
+			);
+
+		// Use a partial search so the entries land in the wide bucket; the
+		// exact-match path is exercised by testExactMatchGoesToExactBucket.
+		$this->plugin->search('luokka', 100, 0, $this->searchResult);
+	}
+
+	public function testLabelOmitsSuffixWhenSchoolNameMissing(): void {
+		$teacher = $this->createMock(IUser::class);
+		$teacher->method('getUID')->willReturn('alice');
+		$this->userSession->method('getUser')->willReturn($teacher);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
+
+		$this->groupMapper->method('searchEntriesForSchools')->willReturn([
+			['gid' => 'class_a', 'school_name' => null],
+		]);
+		$this->groupManager->method('get')->willReturn($this->mockGroup('Class A'));
+		$this->searchResult->method('hasResult')->willReturn(false);
+
+		$this->searchResult->expects($this->once())
+			->method('addResultSet')
+			->with(
+				$this->isInstanceOf(SearchResultType::class),
+				$this->callback(static function (array $wide): bool {
+					return count($wide) === 1 && $wide[0]['label'] === 'Class A';
+				}),
+				[],
+			);
+
+		$this->plugin->search('class', 100, 0, $this->searchResult);
+	}
+
 	public function testExactMatchGoesToExactBucket(): void {
 		$teacher = $this->createMock(IUser::class);
 		$teacher->method('getUID')->willReturn('alice');
 		$this->userSession->method('getUser')->willReturn($teacher);
-		$this->teacherMapper->method('contains')->willReturn(true);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
 
-		$this->groupMapper->method('searchGids')->willReturn(['nct-2024']);
+		$this->groupMapper->method('searchEntriesForSchools')
+			->willReturn([['gid' => 'nct-2024', 'school_name' => null]]);
 		$this->groupManager->method('get')->willReturn($this->mockGroup('nct-2024'));
 		$this->searchResult->method('hasResult')->willReturn(false);
 
@@ -129,9 +196,12 @@ class TeacherClassSearchPluginTest extends TestCase {
 		$teacher = $this->createMock(IUser::class);
 		$teacher->method('getUID')->willReturn('alice');
 		$this->userSession->method('getUser')->willReturn($teacher);
-		$this->teacherMapper->method('contains')->willReturn(true);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
 
-		$this->groupMapper->method('searchGids')->willReturn(['nct-2024', 'nct-2025']);
+		$this->groupMapper->method('searchEntriesForSchools')->willReturn([
+			['gid' => 'nct-2024', 'school_name' => null],
+			['gid' => 'nct-2025', 'school_name' => null],
+		]);
 		$this->groupManager->method('get')->willReturnCallback(
 			fn (string $gid): IGroup => $this->mockGroup($gid),
 		);
@@ -159,9 +229,12 @@ class TeacherClassSearchPluginTest extends TestCase {
 		$teacher = $this->createMock(IUser::class);
 		$teacher->method('getUID')->willReturn('alice');
 		$this->userSession->method('getUser')->willReturn($teacher);
-		$this->teacherMapper->method('contains')->willReturn(true);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
 
-		$this->groupMapper->method('searchGids')->willReturn(['nct-2024', 'ghost']);
+		$this->groupMapper->method('searchEntriesForSchools')->willReturn([
+			['gid' => 'nct-2024', 'school_name' => null],
+			['gid' => 'ghost', 'school_name' => null],
+		]);
 		$this->groupManager->method('get')->willReturnMap([
 			['nct-2024', $this->mockGroup('NCT - 1.luokka')],
 			['ghost', null],                                  // table has it, NC doesn't

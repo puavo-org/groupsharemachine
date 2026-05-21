@@ -28,10 +28,11 @@ class TeacherClassMembership implements GroupInterface {
 	}
 
 	public function inGroup($uid, $gid): bool {
-		if (!$this->groupMapper->contains($gid)) {
+		$schoolDn = $this->groupMapper->getSchoolDn($gid);
+		if ($schoolDn === null) {
 			return false;
 		}
-		return $this->teacherMapper->contains($uid);
+		return $this->teacherMapper->belongsToSchool($uid, $schoolDn);
 	}
 
 	public function getUserGroups($uid): array {

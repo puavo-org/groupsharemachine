@@ -13,7 +13,7 @@ Puavo-specific Nextcloud app. Lets teachers share files with class groups via Ne
 
 This app is only useful in deployments that synchronise from a Puavo LDAP instance via user_ldap, with the puavoEdu* schema in place. It is not a general-purpose sharing helper.
     ]]></description>
-    <version>2.0.0</version>
+    <version>1.0.0</version>
     <licence>AGPL-3.0-or-later</licence>
     <author mail="dev@opinsys.fi" homepage="https://www.opinsys.fi">Opinsys Oy</author>
     <namespace>GroupShareMachine</namespace>

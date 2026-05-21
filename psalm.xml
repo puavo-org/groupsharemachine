@@ -52,11 +52,14 @@
 			<errorLevel type="suppress">
 				<file name="lib/Service/LdapSync.php" />
 				<file name="lib/Db/ClassGroupMapper.php" />
+				<file name="lib/Db/TeacherMapper.php" />
 			</errorLevel>
 		</MixedAssignment>
 		<MixedArrayAccess>
 			<errorLevel type="suppress">
 				<file name="lib/Db/ClassGroupMapper.php" />
+				<file name="lib/Db/TeacherMapper.php" />
+				<file name="lib/Service/LdapSync.php" />
 			</errorLevel>
 		</MixedArrayAccess>
 	</issueHandlers>

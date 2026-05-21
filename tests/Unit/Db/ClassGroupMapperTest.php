@@ -38,6 +38,63 @@ class ClassGroupMapperTest extends TestCase {
 		$this->assertFalse($this->mapper->contains('absent'));
 	}
 
+	public function testUpsertStoresAndUpdatesSchoolName(): void {
+		$this->mapper->upsert('class_1a', 'year class', 'Nextcloud testikoulu');
+		$this->assertSame('Nextcloud testikoulu', $this->mapper->getSchoolName('class_1a'));
+
+		// upsert again with a different school name — should overwrite, not duplicate
+		$this->mapper->upsert('class_1a', 'year class', 'Helsingin yläaste');
+		$this->assertSame('Helsingin yläaste', $this->mapper->getSchoolName('class_1a'));
+
+		// upsert with NULL clears the school name
+		$this->mapper->upsert('class_1a', 'year class', null);
+		$this->assertNull($this->mapper->getSchoolName('class_1a'));
+	}
+
+	public function testGetSchoolNameMissingGid(): void {
+		$this->assertNull($this->mapper->getSchoolName('does_not_exist'));
+	}
+
+	public function testSearchEntriesIncludesSchoolName(): void {
+		$this->mapper->upsert('class_1a', 'year class', 'School A', 'puavoId=1,ou=Groups');
+		$this->mapper->upsert('class_1b', 'year class', null, '');
+
+		$entries = $this->mapper->searchEntries('class_', 100, 0);
+		usort($entries, static fn (array $a, array $b): int => strcmp($a['gid'], $b['gid']));
+
+		$this->assertSame([
+			['gid' => 'class_1a', 'school_name' => 'School A', 'school_dn' => 'puavoId=1,ou=Groups'],
+			['gid' => 'class_1b', 'school_name' => null, 'school_dn' => ''],
+		], $entries);
+	}
+
+	public function testSearchEntriesForSchoolsFiltersByDn(): void {
+		$schoolA = 'puavoId=1,ou=Groups';
+		$schoolB = 'puavoId=2,ou=Groups';
+		$this->mapper->upsert('a_class', 'year class', 'A', $schoolA);
+		$this->mapper->upsert('b_class', 'year class', 'B', $schoolB);
+		$this->mapper->upsert('a_class2', 'year class', 'A', $schoolA);
+
+		// Teacher only in school A — should see two A-classes, no B-classes.
+		$entries = $this->mapper->searchEntriesForSchools('', [$schoolA], 100, 0);
+		$gids = array_column($entries, 'gid');
+		sort($gids);
+		$this->assertSame(['a_class', 'a_class2'], $gids);
+
+		// Empty school set — never returns anything.
+		$this->assertSame([], $this->mapper->searchEntriesForSchools('', [], 100, 0));
+	}
+
+	public function testGetSchoolDn(): void {
+		$schoolA = 'puavoId=1,ou=Groups';
+		$this->mapper->upsert('class_1a', 'year class', 'School A', $schoolA);
+		$this->mapper->upsert('orphan', 'year class', null, '');
+
+		$this->assertSame($schoolA, $this->mapper->getSchoolDn('class_1a'));
+		$this->assertNull($this->mapper->getSchoolDn('orphan'));    // empty string treated as missing
+		$this->assertNull($this->mapper->getSchoolDn('nonexistent'));
+	}
+
 	public function testUpsertInsertsThenUpdates(): void {
 		$this->mapper->upsert('class_1a', 'year class');
 		$this->assertTrue($this->mapper->contains('class_1a'));

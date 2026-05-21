@@ -15,8 +15,8 @@ use Test\TestCase;
 
 /**
  * Pure-unit tests for LdapSync. We override resolveProxy() in a subclass so
- * the test injects an in-memory fake proxy + fake Access — no real LDAP or
- * user_ldap dependency.
+ * the test injects an in-memory fake Group_Proxy / User_Proxy whose Access
+ * obeys our combined-filter contract — no real LDAP and no user_ldap.
  */
 class LdapSyncTest extends TestCase {
 
@@ -29,113 +29,190 @@ class LdapSyncTest extends TestCase {
 		$this->teacherMapper = $this->createMock(TeacherMapper::class);
 	}
 
-	public function testGroupWithAllowedTypeIsUpserted(): void {
+	public function testGroupSearchUpsertsAllowedTypes(): void {
 		$sync = $this->makeSync(
-			groups: ['class_1a' => ['year class']],
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+				'puavoid=11,ou=groups' => ['gid' => 'math_g',   'puavoedugrouptype' => ['teaching_group']],
+			],
+			users: [],
+		);
+
+		$this->groupMapper->expects($this->exactly(2))->method('upsert')
+			->willReturnCallback(function (string $gid, string $type, ?string $schoolName, string $schoolDn): void {
+				$this->assertContains($gid, ['class_1a', 'math_g']);
+				$this->assertContains($type, LdapSync::ALLOWED_GROUP_TYPES);
+				$this->assertNull($schoolName);
+				$this->assertSame('', $schoolDn);
+			});
+		$this->groupMapper->expects($this->once())->method('deleteNotIn')
+			->with($this->callback(static fn (array $kept): bool => count($kept) === 2))
+			->willReturn(0);
+		// Empty users list → no User_Proxy sample → teacher sync skipped entirely.
+
+		$stats = $sync->run();
+		$this->assertSame(['seen' => 2, 'kept' => 2, 'pruned' => 0], $stats['groups']);
+		$this->assertSame(['seen' => 0, 'kept' => 0, 'pruned' => 0], $stats['teachers']);
+	}
+
+	public function testGroupSearchSkipsRecordsWithoutDnOrType(): void {
+		$sync = $this->makeSync(
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+				'__no_dn__' => ['gid' => null, 'puavoedugrouptype' => ['year class']],
+				'puavoid=12,ou=groups' => ['gid' => 'orphan', 'puavoedugrouptype' => []],
+			],
 			users: [],
 		);
 
 		$this->groupMapper->expects($this->once())->method('upsert')
-			->with('class_1a', 'year class');
-		$this->groupMapper->expects($this->never())->method('deleteByGid');
+			->with('class_1a', 'year class', null, '');
 		$this->groupMapper->expects($this->once())->method('deleteNotIn')
-			->with(['class_1a'])->willReturn(0);
-		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
-			->with([])->willReturn(0);
-
-		$stats = $sync->run();
-		$this->assertSame(['seen' => 1, 'kept' => 1, 'pruned' => 0], $stats['groups']);
-	}
-
-	public function testGroupWithDisallowedTypeIsDeleted(): void {
-		$sync = $this->makeSync(
-			groups: ['random_group' => ['some_other_type']],
-			users: [],
-		);
-
-		$this->groupMapper->expects($this->never())->method('upsert');
-		$this->groupMapper->expects($this->once())->method('deleteByGid')
-			->with('random_group');
-		$this->groupMapper->expects($this->once())->method('deleteNotIn')
-			->with([])->willReturn(0);
-
-		$stats = $sync->run();
-		$this->assertSame(['seen' => 1, 'kept' => 0, 'pruned' => 0], $stats['groups']);
-	}
-
-	public function testGroupWithMissingAttributeIsDeleted(): void {
-		$sync = $this->makeSync(
-			groups: ['no_attr' => []],   // empty multi-value list
-			users: [],
-		);
-
-		$this->groupMapper->expects($this->never())->method('upsert');
-		$this->groupMapper->expects($this->once())->method('deleteByGid')
-			->with('no_attr');
+			->with(['class_1a']);
 
 		$sync->run();
 	}
 
-	public function testMultiValuedTeacherAffiliationUpserts(): void {
-		// The bug we shipped once: user has 'admin' AND 'teacher'.
-		// user_ldap flattens to 'admin'; reading the raw multi-valued attribute
-		// must still pick out 'teacher'.
+	public function testGroupSearchResolvesAndCachesSchoolName(): void {
+		// Two class groups in the same school, plus one in a different school.
+		// LdapSync should resolve the school's displayname via readAttribute
+		// and cache it within the run — only 2 LDAP attribute reads, not 3.
+		$schoolA = 'puavoid=670923,ou=Groups,dc=edu,dc=toimisto,dc=fi';
+		$schoolB = 'puavoid=999999,ou=Groups,dc=edu,dc=toimisto,dc=fi';
+
 		$sync = $this->makeSync(
-			groups: [],
-			users: ['eluttine' => ['admin', 'teacher']],
+			groups: [
+				'puavoid=10,ou=groups' => [
+					'gid' => 'class_1a',
+					'puavoedugrouptype' => ['year class'],
+					'puavoschool' => [$schoolA],
+				],
+				'puavoid=11,ou=groups' => [
+					'gid' => 'class_2a',
+					'puavoedugrouptype' => ['year class'],
+					'puavoschool' => [$schoolA],
+				],
+				'puavoid=12,ou=groups' => [
+					'gid' => 'class_1b',
+					'puavoedugrouptype' => ['year class'],
+					'puavoschool' => [$schoolB],
+				],
+			],
+			users: [],
+			schools: [
+				$schoolA => 'Nextcloud testikoulu',
+				$schoolB => 'Helsingin yläaste',
+			],
 		);
 
-		$this->teacherMapper->expects($this->once())->method('upsert')
-			->with('eluttine');
-		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
-			->with(['eluttine'])->willReturn(0);
+		$expected = [
+			'class_1a' => ['Nextcloud testikoulu', $schoolA],
+			'class_2a' => ['Nextcloud testikoulu', $schoolA],
+			'class_1b' => ['Helsingin yläaste', $schoolB],
+		];
+		$this->groupMapper->expects($this->exactly(3))->method('upsert')
+			->willReturnCallback(function (string $gid, string $type, ?string $schoolName, string $schoolDn) use ($expected): void {
+				$this->assertSame($expected[$gid][0], $schoolName);
+				$this->assertSame($expected[$gid][1], $schoolDn);
+			});
+		$this->groupMapper->expects($this->once())->method('deleteNotIn');
 
-		$stats = $sync->run();
-		$this->assertSame(['seen' => 1, 'kept' => 1, 'pruned' => 0], $stats['teachers']);
+		$sync->run();
+
+		// Each school DN should be looked up exactly once (cache hit on the
+		// second class of the same school).
+		$counts = $sync->getReadAttributeCounts();
+		$this->assertSame(1, $counts[$schoolA] ?? 0);
+		$this->assertSame(1, $counts[$schoolB] ?? 0);
 	}
 
-	public function testUserWithoutTeacherAffiliationIsNotUpserted(): void {
+	public function testTeacherSearchWritesOneRowPerSchool(): void {
+		// Each user's puavoSchool can be multi-valued — write one (uid, school)
+		// row per school. The LDAP filter matches users whose affiliation
+		// contains 'teacher'; the server pre-filters that.
+		$schoolA = 'puavoId=10,ou=Groups,dc=edu';
+		$schoolB = 'puavoId=20,ou=Groups,dc=edu';
 		$sync = $this->makeSync(
 			groups: [],
 			users: [
-				'alice' => ['admin', 'staff'],
-				'bob' => ['student'],
+				'puavoid=557917,ou=people' => ['uid' => '557917', 'puavoschool' => [$schoolA, $schoolB]],
+				'puavoid=401720,ou=people' => ['uid' => '401720', 'puavoschool' => [$schoolA]],
+			],
+		);
+
+		// 3 upsert calls total: (557917, A), (557917, B), (401720, A)
+		$expected = [
+			['557917', $schoolA],
+			['557917', $schoolB],
+			['401720', $schoolA],
+		];
+		$this->teacherMapper->expects($this->exactly(3))->method('upsert')
+			->willReturnCallback(function (string $uid, string $schoolDn) use ($expected): void {
+				$this->assertContains([$uid, $schoolDn], $expected);
+			});
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
+			->with($this->callback(static fn (array $kept): bool => count($kept) === 3))
+			->willReturn(0);
+
+		$stats = $sync->run();
+		$this->assertSame(['seen' => 2, 'kept' => 3, 'pruned' => 0], $stats['teachers']);
+	}
+
+	public function testTeacherWithoutAnySchoolIsSkipped(): void {
+		// A teacher entry without puavoSchool can't be scoped — record nothing.
+		$sync = $this->makeSync(
+			groups: [],
+			users: [
+				'puavoid=999,ou=people' => ['uid' => '999'],   // no 'puavoschool' key
 			],
 		);
 
 		$this->teacherMapper->expects($this->never())->method('upsert');
-		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
-			->with([])->willReturn(0);
-
-		$stats = $sync->run();
-		$this->assertSame(['seen' => 2, 'kept' => 0, 'pruned' => 0], $stats['teachers']);
-	}
-
-	public function testDeleteNotInReceivesKeptList(): void {
-		$sync = $this->makeSync(
-			groups: [
-				'class_a' => ['year class'],
-				'random' => ['unknown'],
-				'class_b' => ['teaching_group'],
-			],
-			users: [
-				'teacher1' => ['teacher'],
-				'teacher2' => ['admin', 'teacher'],
-				'student1' => ['student'],
-			],
-		);
-
-		$this->groupMapper->expects($this->once())->method('deleteNotIn')
-			->with(['class_a', 'class_b'])->willReturn(0);
-		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
-			->with(['teacher1', 'teacher2'])->willReturn(0);
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')->with([]);
 
 		$sync->run();
 	}
 
+	public function testTeacherSearchSkipsRecordsWithoutDn(): void {
+		$schoolA = 'puavoId=10,ou=Groups,dc=edu';
+		$sync = $this->makeSync(
+			groups: [],
+			users: [
+				'puavoid=557917,ou=people' => ['uid' => '557917', 'puavoschool' => [$schoolA]],
+				'__no_dn__' => ['uid' => null, 'puavoschool' => [$schoolA]],
+			],
+		);
+
+		$this->teacherMapper->expects($this->once())->method('upsert')
+			->with('557917', $schoolA);
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')
+			->with([['557917', $schoolA]]);
+
+		$sync->run();
+	}
+
+	public function testCombinedFilterIncludesConfiguredFilterAndPredicate(): void {
+		$sync = $this->makeSync(
+			groups: ['puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']]],
+			users: ['puavoid=20,ou=people' => ['uid' => 'alice']],
+		);
+		$sync->run();
+
+		$groupFilters = $sync->getCapturedGroupFilters();
+		$this->assertNotEmpty($groupFilters);
+		$last = end($groupFilters);
+		$this->assertCount(2, $last);
+		$this->assertSame('(objectClass=groupOfFakes)', $last[0]);
+		$this->assertStringContainsString('puavoEduGroupType', $last[1]);
+		$this->assertStringContainsString('year class', $last[1]);
+
+		$userFilters = $sync->getCapturedUserFilters();
+		$lastUser = end($userFilters);
+		$this->assertSame('(objectClass=puavoEduPerson)', $lastUser[0]);
+		$this->assertStringContainsString('puavoEduPersonAffiliation=teacher', $lastUser[1]);
+	}
+
 	public function testProxyAbsentBecomesNoOp(): void {
-		// When user_ldap isn't installed, resolveProxy returns null and we
-		// shouldn't write anything to the tables.
 		$sync = new class($this->groupMapper, $this->teacherMapper, new NullLogger()) extends LdapSync {
 			protected function resolveProxy(string $class): ?object {
 				return null;
@@ -143,7 +220,6 @@ class LdapSyncTest extends TestCase {
 		};
 
 		$this->groupMapper->expects($this->never())->method('upsert');
-		$this->groupMapper->expects($this->never())->method('deleteByGid');
 		$this->groupMapper->expects($this->never())->method('deleteNotIn');
 		$this->teacherMapper->expects($this->never())->method('upsert');
 		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
@@ -158,122 +234,183 @@ class LdapSyncTest extends TestCase {
 		);
 	}
 
+	public function testEmptyLdapBecomesNoOp(): void {
+		$sync = $this->makeSync(groups: [], users: []);
+
+		$this->groupMapper->expects($this->never())->method('upsert');
+		$this->teacherMapper->expects($this->never())->method('upsert');
+
+		$stats = $sync->run();
+		$this->assertSame(0, $stats['groups']['seen']);
+		$this->assertSame(0, $stats['teachers']['seen']);
+	}
+
 	/**
-	 * Build an LdapSync subclass whose resolveProxy() returns fake proxies
-	 * driven by the canned $groups (gid => affiliation values) and
-	 * $users (uid => affiliation values) maps.
+	 * Build an LdapSync subclass with fake Group_Proxy / User_Proxy.
 	 *
-	 * @param array<string, list<string>> $groups
-	 * @param array<string, list<string>> $users
+	 * @param array<string, array{gid: ?string, puavoedugrouptype: list<string>}> $groups DN-keyed
+	 * @param array<string, array{uid: ?string}> $users DN-keyed
 	 */
-	private function makeSync(array $groups, array $users): LdapSync {
-		$access = new class($groups, $users) {
-			/**
-			 * @param array<string, list<string>> $groups
-			 * @param array<string, list<string>> $users
-			 */
+	private function makeSync(array $groups, array $users, array $schools = []): LdapSyncTestDouble {
+		$groupAccess = $this->buildAccess($groups, $schools);
+		$userAccess = $this->buildAccess($users, []);
+
+		$groupSample = array_values($groups)[0]['gid'] ?? null;
+		$userSample = array_values($users)[0]['uid'] ?? null;
+		$groupProxy = $this->buildProxy($groupAccess, $groupSample);
+		$userProxy = $this->buildProxy($userAccess, $userSample);
+
+		return new LdapSyncTestDouble(
+			$this->groupMapper,
+			$this->teacherMapper,
+			new NullLogger(),
+			$groupProxy,
+			$userProxy,
+		);
+	}
+
+	/**
+	 * @param array<string, array<string, mixed>> $records DN-keyed test data
+	 */
+	private function buildAccess(array $records, array $schoolDirectory): object {
+		return new class($records, $schoolDirectory) {
+			/** @var list<array<int, string>> */
+			public array $capturedFilterCalls = [];
+
+			/** @var array<string, int> readAttribute call counts per DN */
+			public array $readAttributeCalls = [];
+
 			public function __construct(
-				private array $groups,
-				private array $users,
+				private array $records,
+				private array $schoolDirectory,
 			) {
 			}
 
-			public function groupname2dn(string $gid): false|string {
-				return isset($this->groups[$gid]) ? "cn={$gid},ou=Groups" : false;
+			public function getConnection(): object {
+				return new class {
+					public string $ldapGroupFilter = '(objectClass=groupOfFakes)';
+					public string $ldapUserFilter = '(objectClass=puavoEduPerson)';
+				};
 			}
 
-			public function username2dn(string $uid): false|string {
-				return isset($this->users[$uid]) ? "uid={$uid},ou=People" : false;
+			public function combineFilterWithAnd(array $filters): string {
+				$this->capturedFilterCalls[] = $filters;
+				return '(&' . implode('', $filters) . ')';
 			}
 
-			/**
-			 * @return list<string>|false
-			 */
-			public function readAttribute(string $dn, string $attr): array|false {
-				if ($attr === LdapSync::GROUP_TYPE_ATTR) {
-					foreach ($this->groups as $gid => $values) {
-						if ($dn === "cn={$gid},ou=Groups") {
-							return $values;
-						}
+			public function searchGroups(string $filter, array $attr, int $limit, int $offset): array {
+				return $this->materialize($offset, $limit);
+			}
+
+			public function searchUsers(string $filter, array $attr, int $limit, int $offset): array {
+				return $this->materialize($offset, $limit);
+			}
+
+			private function materialize(int $offset, int $limit): array {
+				$out = [];
+				$dns = array_keys($this->records);
+				foreach (array_slice($dns, $offset, $limit) as $dn) {
+					$row = ['dn' => str_starts_with($dn, '__no_dn__') ? [] : [$dn]];
+					$attrs = $this->records[$dn];
+					if (isset($attrs['puavoedugrouptype']) && $attrs['puavoedugrouptype'] !== []) {
+						$row['puavoedugrouptype'] = $attrs['puavoedugrouptype'];
 					}
+					if (isset($attrs['puavoschool']) && $attrs['puavoschool'] !== []) {
+						$row['puavoschool'] = $attrs['puavoschool'];
+					}
+					$out[] = $row;
+				}
+				return $out;
+			}
+
+			public function dn2ocname(string $dn, ?string $hint, bool $isUser): false|string {
+				if (!isset($this->records[$dn])) {
 					return false;
 				}
-				if ($attr === LdapSync::AFFILIATION_ATTR) {
-					foreach ($this->users as $uid => $values) {
-						if ($dn === "uid={$uid},ou=People") {
-							return $values;
-						}
-					}
-					return false;
+				$key = $isUser ? 'uid' : 'gid';
+				$value = $this->records[$dn][$key] ?? null;
+				return is_string($value) ? $value : false;
+			}
+
+			public function readAttribute(string $dn, string $attr): array|false {
+				$this->readAttributeCalls[$dn] = ($this->readAttributeCalls[$dn] ?? 0) + 1;
+				if (strtolower($attr) === 'displayname' && isset($this->schoolDirectory[$dn])) {
+					return [$this->schoolDirectory[$dn]];
 				}
 				return false;
 			}
 		};
+	}
 
-		$groupProxy = new class(array_keys($groups), $access) {
-			/**
-			 * @param list<string> $gids
-			 */
+	private function buildProxy(object $access, ?string $sample): object {
+		return new class($access, $sample) {
 			public function __construct(
-				private array $gids,
 				private object $access,
+				private ?string $sample,
 			) {
 			}
 
-			/**
-			 * @return list<string>
-			 */
 			public function getGroups(string $search, int $limit, int $offset): array {
-				return array_slice($this->gids, $offset, $limit);
+				return $this->sample === null ? [] : [$this->sample];
 			}
 
-			public function getLDAPAccess(string $gid): object {
-				return $this->access;
-			}
-		};
-
-		$userProxy = new class(array_keys($users), $access) {
-			/**
-			 * @param list<string> $uids
-			 */
-			public function __construct(
-				private array $uids,
-				private object $access,
-			) {
-			}
-
-			/**
-			 * @return list<string>
-			 */
 			public function getUsers(string $search, int $limit, int $offset): array {
-				return array_slice($this->uids, $offset, $limit);
+				return $this->sample === null ? [] : [$this->sample];
 			}
 
-			public function getLDAPAccess(string $uid): object {
+			public function getLDAPAccess(string $id): object {
 				return $this->access;
 			}
 		};
+	}
+}
 
-		return new class($this->groupMapper, $this->teacherMapper, new NullLogger(), $groupProxy, $userProxy) extends LdapSync {
-			public function __construct(
-				ClassGroupMapper $groupMapper,
-				TeacherMapper $teacherMapper,
-				NullLogger $logger,
-				private object $groupProxy,
-				private object $userProxy,
-			) {
-				parent::__construct($groupMapper, $teacherMapper, $logger);
-			}
+/**
+ * Test-double subclass exposing fake proxies + captured filter inputs.
+ */
+class LdapSyncTestDouble extends LdapSync {
 
-			protected function resolveProxy(string $class): ?object {
-				if ($class === 'OCA\\User_LDAP\\Group_Proxy') {
-					return $this->groupProxy;
-				}
-				if ($class === 'OCA\\User_LDAP\\User_Proxy') {
-					return $this->userProxy;
-				}
-				return null;
-			}
-		};
+	public function __construct(
+		ClassGroupMapper $groupMapper,
+		TeacherMapper $teacherMapper,
+		NullLogger $logger,
+		private object $groupProxy,
+		private object $userProxy,
+	) {
+		parent::__construct($groupMapper, $teacherMapper, $logger);
+	}
+
+	protected function resolveProxy(string $class): ?object {
+		if ($class === 'OCA\\User_LDAP\\Group_Proxy') {
+			return $this->groupProxy;
+		}
+		if ($class === 'OCA\\User_LDAP\\User_Proxy') {
+			return $this->userProxy;
+		}
+		return null;
+	}
+
+	/**
+	 * @return list<array<int, string>>
+	 */
+	public function getCapturedGroupFilters(): array {
+		$access = $this->groupProxy->getLDAPAccess('');
+		return $access->capturedFilterCalls;
+	}
+
+	/**
+	 * @return list<array<int, string>>
+	 */
+	public function getCapturedUserFilters(): array {
+		$access = $this->userProxy->getLDAPAccess('');
+		return $access->capturedFilterCalls;
+	}
+
+	/**
+	 * @return array<string, int>
+	 */
+	public function getReadAttributeCounts(): array {
+		$access = $this->groupProxy->getLDAPAccess('');
+		return $access->readAttributeCalls;
 	}
 }

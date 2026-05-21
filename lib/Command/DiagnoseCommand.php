@@ -50,8 +50,23 @@ class DiagnoseCommand extends Command {
 
 		$user = $this->userManager->get($uid);
 		$output->writeln('user exists in Nextcloud:           ' . ($user === null ? 'NO' : 'YES'));
-		$output->writeln('user in groupsharemachine_teachers: ' . ($this->teacherMapper->contains($uid) ? 'YES' : 'NO'));
-		$output->writeln('group in groupsharemachine_groups:  ' . ($this->groupMapper->contains($gid) ? 'YES' : 'NO'));
+
+		$teacherSchools = $this->teacherMapper->schoolsForTeacher($uid);
+		$output->writeln('user is a teacher in:               '
+			. ($teacherSchools === [] ? '(no school)' : implode(', ', $teacherSchools)));
+
+		$inTable = $this->groupMapper->contains($gid);
+		$output->writeln('group in groupsharemachine_groups:  ' . ($inTable ? 'YES' : 'NO'));
+		if ($inTable) {
+			$school = $this->groupMapper->getSchoolName($gid);
+			$schoolDn = $this->groupMapper->getSchoolDn($gid);
+			$output->writeln('  school_name:                      ' . ($school ?? '(none recorded)'));
+			$output->writeln('  school_dn:                        ' . ($schoolDn ?? '(none recorded)'));
+			if ($schoolDn !== null) {
+				$inScope = in_array($schoolDn, $teacherSchools, true);
+				$output->writeln('  teacher belongs to that school:   ' . ($inScope ? 'YES' : 'NO'));
+			}
+		}
 
 		$group = $this->groupManager->get($gid);
 		$output->writeln('group resolves via IGroupManager:   ' . ($group === null ? 'NO' : 'YES'));

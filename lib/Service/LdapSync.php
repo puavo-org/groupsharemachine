@@ -13,20 +13,23 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
- * Walks LDAP via user_ldap's proxies and refreshes two local tables:
+ * Refreshes two local tables from puavo LDAP via user_ldap:
  *  - groupsharemachine_groups: gids whose puavoEduGroupType is in the allow-list
- *  - groupsharemachine_teachers: uids whose puavoEduPersonAffiliation includes 'teacher'
+ *  - groupsharemachine_teachers: uids whose puavoEduPersonAffiliation contains 'teacher'
  *
- * The teacher attribute is multi-valued in LDAP, but Nextcloud's role
- * account property is single-valued and user_ldap loses any non-primary
- * value during sync. Reading the LDAP attribute directly fixes that.
+ * Uses paged LDAP search with a combined filter (user_ldap's configured
+ * user/group filter AND our attribute predicate). One LDAP roundtrip per page
+ * regardless of total user/group count — O(matches / pageSize), not O(total).
  *
- * user_ldap's Group_Proxy / User_Proxy / Access are not OCP — we resolve
- * them lazily and the sync becomes a no-op if user_ldap is unavailable.
+ * Couples to user_ldap internals (Group_Proxy / User_Proxy / Access).
+ * user_ldap is a core Nextcloud app, but those classes are not OCP, so we
+ * resolve them lazily and the sync becomes a no-op when they're unavailable.
  */
 class LdapSync {
 
 	public const GROUP_TYPE_ATTR = 'puavoEduGroupType';
+	public const SCHOOL_ATTR = 'puavoSchool';
+	public const SCHOOL_NAME_ATTR = 'displayName';
 	public const AFFILIATION_ATTR = 'puavoEduPersonAffiliation';
 	public const TEACHER_AFFILIATION = 'teacher';
 
@@ -59,105 +62,169 @@ class LdapSync {
 	 * @return array{seen: int, kept: int, pruned: int}
 	 */
 	private function syncGroups(): array {
-		$proxy = $this->resolveProxy('OCA\\User_LDAP\\Group_Proxy');
-		if ($proxy === null) {
-			$this->logger->info('user_ldap Group_Proxy not available, skipping group sync.');
-			return ['seen' => 0, 'kept' => 0, 'pruned' => 0];
+		$access = $this->resolveAccess('OCA\\User_LDAP\\Group_Proxy', isUser: false);
+		if ($access === null) {
+			$this->logger->info('user_ldap Group_Proxy/Access not available, skipping group sync.');
+			return $this->emptyStats();
 		}
+
+		$filter = $access->combineFilterWithAnd([
+			$access->getConnection()->ldapGroupFilter,
+			$this->orFilter(self::GROUP_TYPE_ATTR, self::ALLOWED_GROUP_TYPES),
+		]);
 
 		$kept = [];
 		$seen = 0;
 		$offset = 0;
+		/** @var array<string, ?string> $schoolNameCache  DN -> resolved displayName (or null) */
+		$schoolNameCache = [];
 		do {
-			/** @var list<string> $gids */
-			$gids = $proxy->getGroups('', self::PAGE_SIZE, $offset);
-			foreach ($gids as $gid) {
+			$records = $this->safeSearch($access, isUser: false, filter: $filter, offset: $offset);
+			foreach ($records as $record) {
 				$seen++;
-				$type = $this->readAttributeForId($proxy, $gid, self::GROUP_TYPE_ATTR, self::ALLOWED_GROUP_TYPES);
-				if ($type !== null) {
-					$this->groupMapper->upsert($gid, $type);
-					$kept[] = $gid;
-				} else {
-					$this->groupMapper->deleteByGid($gid);
+				$dn = $record['dn'][0] ?? null;
+				$type = $record[strtolower(self::GROUP_TYPE_ATTR)][0] ?? null;
+				if (!is_string($dn) || !is_string($type)) {
+					continue;
 				}
+				$gid = $this->dnToOcName($access, $dn, isUser: false);
+				if ($gid === null) {
+					continue;
+				}
+				$schoolDn = $record[strtolower(self::SCHOOL_ATTR)][0] ?? null;
+				$schoolName = null;
+				if (is_string($schoolDn) && $schoolDn !== '') {
+					$schoolName = $schoolNameCache[$schoolDn] ??= $this->resolveSchoolName($access, $schoolDn);
+				}
+				$this->groupMapper->upsert($gid, $type, $schoolName, is_string($schoolDn) ? $schoolDn : '');
+				$kept[] = $gid;
 			}
 			$offset += self::PAGE_SIZE;
-		} while (count($gids) === self::PAGE_SIZE);
+		} while (count($records) === self::PAGE_SIZE);
 
 		$pruned = $this->groupMapper->deleteNotIn($kept);
 		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned];
+	}
+
+	private function resolveSchoolName(object $access, string $schoolDn): ?string {
+		try {
+			$values = $access->readAttribute($schoolDn, self::SCHOOL_NAME_ATTR);
+		} catch (Throwable $e) {
+			$this->logger->warning("resolveSchoolName failed for {$schoolDn}: " . $e->getMessage());
+			return null;
+		}
+		if (!is_array($values) || $values === []) {
+			return null;
+		}
+		$first = $values[0] ?? null;
+		return is_string($first) ? $first : null;
 	}
 
 	/**
 	 * @return array{seen: int, kept: int, pruned: int}
 	 */
 	private function syncTeachers(): array {
-		$proxy = $this->resolveProxy('OCA\\User_LDAP\\User_Proxy');
-		if ($proxy === null) {
-			$this->logger->info('user_ldap User_Proxy not available, skipping teacher sync.');
-			return ['seen' => 0, 'kept' => 0, 'pruned' => 0];
+		$access = $this->resolveAccess('OCA\\User_LDAP\\User_Proxy', isUser: true);
+		if ($access === null) {
+			$this->logger->info('user_ldap User_Proxy/Access not available, skipping teacher sync.');
+			return $this->emptyStats();
 		}
 
+		$filter = $access->combineFilterWithAnd([
+			$access->getConnection()->ldapUserFilter,
+			'(' . self::AFFILIATION_ATTR . '=' . self::escapeLdapValue(self::TEACHER_AFFILIATION) . ')',
+		]);
+
+		/** @var list<array{0: string, 1: string}> $kept (uid, school_dn) pairs */
 		$kept = [];
 		$seen = 0;
 		$offset = 0;
 		do {
-			/** @var list<string> $uids */
-			$uids = $proxy->getUsers('', self::PAGE_SIZE, $offset);
-			foreach ($uids as $uid) {
+			$records = $this->safeSearch($access, isUser: true, filter: $filter, offset: $offset);
+			foreach ($records as $record) {
 				$seen++;
-				$match = $this->readAttributeForId($proxy, $uid, self::AFFILIATION_ATTR, [self::TEACHER_AFFILIATION]);
-				if ($match !== null) {
-					$this->teacherMapper->upsert($uid);
-					$kept[] = $uid;
+				$dn = $record['dn'][0] ?? null;
+				if (!is_string($dn)) {
+					continue;
+				}
+				$uid = $this->dnToOcName($access, $dn, isUser: true);
+				if ($uid === null) {
+					continue;
+				}
+				$schools = $record[strtolower(self::SCHOOL_ATTR)] ?? null;
+				if (!is_array($schools) || $schools === []) {
+					// A teacher without an assigned school can't share to any
+					// class — record nothing.
+					continue;
+				}
+				foreach ($schools as $schoolDn) {
+					if (!is_string($schoolDn) || $schoolDn === '') {
+						continue;
+					}
+					$this->teacherMapper->upsert($uid, $schoolDn);
+					$kept[] = [$uid, $schoolDn];
 				}
 			}
 			$offset += self::PAGE_SIZE;
-		} while (count($uids) === self::PAGE_SIZE);
+		} while (count($records) === self::PAGE_SIZE);
 
 		$pruned = $this->teacherMapper->deleteNotIn($kept);
 		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned];
 	}
 
 	/**
-	 * Read a (potentially multi-valued) LDAP attribute and return the first
-	 * value that appears in $allowed, or null if none match.
-	 *
-	 * @param list<string> $allowed
+	 * @return array
 	 */
-	private function readAttributeForId(object $proxy, string $id, string $attr, array $allowed): ?string {
+	private function safeSearch(object $access, bool $isUser, string $filter, int $offset): array {
 		try {
-			$access = $proxy->getLDAPAccess($id);
-			if ($access === null) {
-				return null;
-			}
-			$dn = $this->resolveDn($access, $id, $attr === self::AFFILIATION_ATTR);
-			if ($dn === false) {
-				return null;
-			}
-			$values = $access->readAttribute($dn, $attr);
+			$attrs = $isUser
+				? ['dn', strtolower(self::SCHOOL_ATTR)]
+				: ['dn', strtolower(self::GROUP_TYPE_ATTR), strtolower(self::SCHOOL_ATTR)];
+			$records = $isUser
+				? $access->searchUsers($filter, $attrs, self::PAGE_SIZE, $offset)
+				: $access->searchGroups($filter, $attrs, self::PAGE_SIZE, $offset);
+			return is_array($records) ? $records : [];
 		} catch (Throwable $e) {
-			$this->logger->warning("Failed to read {$attr} for {$id}: " . $e->getMessage());
-			return null;
+			$this->logger->warning(
+				($isUser ? 'searchUsers' : 'searchGroups') . " failed at offset {$offset}: " . $e->getMessage(),
+			);
+			return [];
 		}
-
-		if (!is_array($values) || $values === []) {
-			return null;
-		}
-
-		foreach ($values as $value) {
-			$value = (string)$value;
-			if (in_array($value, $allowed, true)) {
-				return $value;
-			}
-		}
-		return null;
 	}
 
-	private function resolveDn(object $access, string $id, bool $isUser): false|string {
-		return $isUser
-			? $access->username2dn($id)
-			: $access->groupname2dn($id);
+	private function dnToOcName(object $access, string $dn, bool $isUser): ?string {
+		try {
+			$name = $access->dn2ocname($dn, null, $isUser);
+		} catch (Throwable $e) {
+			$this->logger->warning("dn2ocname failed for {$dn}: " . $e->getMessage());
+			return null;
+		}
+		return is_string($name) ? $name : null;
+	}
+
+	private function resolveAccess(string $proxyClass, bool $isUser): ?object {
+		$proxy = $this->resolveProxy($proxyClass);
+		if ($proxy === null) {
+			return null;
+		}
+		try {
+			$sample = $isUser
+				? $proxy->getUsers('', 1, 0)
+				: $proxy->getGroups('', 1, 0);
+		} catch (Throwable $e) {
+			$this->logger->info("{$proxyClass} sample fetch failed: " . $e->getMessage());
+			return null;
+		}
+		if (!is_array($sample) || $sample === []) {
+			return null;
+		}
+		try {
+			$access = $proxy->getLDAPAccess((string)$sample[0]);
+		} catch (Throwable $e) {
+			$this->logger->info("{$proxyClass}::getLDAPAccess failed: " . $e->getMessage());
+			return null;
+		}
+		return is_object($access) ? $access : null;
 	}
 
 	protected function resolveProxy(string $class): ?object {
@@ -172,5 +239,29 @@ class LdapSync {
 		}
 		/** @var object|null $instance */
 		return $instance;
+	}
+
+	/**
+	 * @param list<string> $values
+	 */
+	private function orFilter(string $attr, array $values): string {
+		return '(|' . implode('', array_map(
+			static fn (string $v): string => '(' . $attr . '=' . self::escapeLdapValue($v) . ')',
+			$values,
+		)) . ')';
+	}
+
+	private static function escapeLdapValue(string $value): string {
+		// RFC 4515: escape ( ) * \ NUL. The space in 'year class' doesn't need
+		// escaping in a filter value. LDAP_ESCAPE_FILTER === 2 in ext-ldap;
+		// inlined so static analysis doesn't need the extension loaded.
+		return ldap_escape($value, '', 2);
+	}
+
+	/**
+	 * @return array{seen: int, kept: int, pruned: int}
+	 */
+	private function emptyStats(): array {
+		return ['seen' => 0, 'kept' => 0, 'pruned' => 0];
 	}
 }

@@ -37,7 +37,8 @@ class TeacherClassSearchPlugin implements ISearchPlugin {
 		if ($searcher === null) {
 			return false;
 		}
-		if (!$this->teacherMapper->contains($searcher->getUID())) {
+		$schools = $this->teacherMapper->schoolsForTeacher($searcher->getUID());
+		if ($schools === []) {
 			return false;
 		}
 
@@ -45,7 +46,8 @@ class TeacherClassSearchPlugin implements ISearchPlugin {
 		$exact = [];
 		$wide = [];
 
-		foreach ($this->groupMapper->searchGids($search, $limit, $offset) as $gid) {
+		foreach ($this->groupMapper->searchEntriesForSchools($search, $schools, $limit, $offset) as $row) {
+			$gid = $row['gid'];
 			if ($searchResult->hasResult($type, $gid)) {
 				continue;
 			}
@@ -54,8 +56,11 @@ class TeacherClassSearchPlugin implements ISearchPlugin {
 				continue;
 			}
 			$displayName = $group->getDisplayName();
+			$label = $row['school_name'] !== null && $row['school_name'] !== ''
+				? sprintf('%s (%s)', $displayName, $row['school_name'])
+				: $displayName;
 			$entry = [
-				'label' => $displayName,
+				'label' => $label,
 				'value' => [
 					'shareType' => IShare::TYPE_GROUP,
 					'shareWith' => $gid,
