@@ -7,7 +7,6 @@ declare(strict_types=1);
 namespace OCA\GroupShareMachine\Db;
 
 use OCP\AppFramework\Db\QBMapper;
-use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
@@ -111,10 +110,10 @@ class TeacherMapper extends QBMapper {
 		}
 
 		$keepExpr = array_map(
-			fn (array $pair): string => '(' .
-				$qb->expr()->eq('uid', $qb->createNamedParameter($pair[0]))
-				. ' AND ' .
-				$qb->expr()->eq('school_dn', $qb->createNamedParameter($pair[1]))
+			fn (array $pair): string => '('
+				. $qb->expr()->eq('uid', $qb->createNamedParameter($pair[0]))
+				. ' AND '
+				. $qb->expr()->eq('school_dn', $qb->createNamedParameter($pair[1]))
 				. ')',
 			$keep,
 		);
