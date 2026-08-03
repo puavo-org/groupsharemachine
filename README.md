@@ -31,20 +31,102 @@ Reading `puavoEduPersonAffiliation` directly (rather than via Nextcloud's `role`
 - Groups in LDAP have `puavoEduGroupType` set to `year class`, `teaching group`, or `course group` for the classes teachers should be allowed to share to
 - The admin setting **Sharing → Restrict users to only share with users in their groups** turned on (or `occ config:app:set core shareapi_only_share_with_group_members --value=yes`) — without this the restriction the app bypasses doesn't exist in the first place
 
-## Setup
+## Installation
+
+This app is installed manually — it is not distributed through the Nextcloud App Store, so `occ app:install` will not find it. Installing means putting the app directory on the server yourself and enabling it.
+
+There is nothing to compile and no runtime dependencies: the app is plain PHP, and Nextcloud autoloads `OCA\GroupShareMachine\` from `lib/` on its own. Do **not** run `composer install` on the server — the Composer setup in this repo only installs development tools.
+
+Commands below assume `/var/www/html` as the Nextcloud root and `www-data` as the web server user; adjust to your deployment. Run every `occ` command as the web server user (`sudo -u www-data php occ ...`).
+
+### 1. Get the app onto the server
+
+Either build a tarball from a checkout (on any machine with `make`):
 
 ```bash
-# enable the app
-occ app:enable groupsharemachine
-
-# turn on the standard restriction so non-teachers stay constrained
-occ config:app:set core shareapi_only_share_with_group_members --value=yes
-
-# do an initial group-type sync (otherwise it runs every 15 minutes)
-occ groupsharemachine:sync
+git clone https://github.com/puavo-org/groupsharemachine.git
+cd groupsharemachine
+git checkout v1.0.0          # or the version you want
+make                         # -> build/groupsharemachine.tar.gz
 ```
 
-`occ groupsharemachine:sync` reports something like `seen=482 kept=37 pruned=0`.
+The tarball contains only what the app needs at runtime (`appinfo/`, `lib/`, `img/`, licences) and unpacks to a single `groupsharemachine/` directory.
+
+Then unpack it into the Nextcloud apps directory:
+
+```bash
+sudo tar xzf groupsharemachine.tar.gz -C /var/www/html/apps/
+sudo chown -R www-data:www-data /var/www/html/apps/groupsharemachine
+```
+
+Or copy a checkout straight into place, if you prefer to skip the tarball:
+
+```bash
+sudo rsync -a --delete \
+    --exclude '.git' --exclude 'build' --exclude 'tests' \
+    --exclude 'vendor' --exclude 'vendor-bin' \
+    groupsharemachine/ /var/www/html/apps/groupsharemachine/
+sudo chown -R www-data:www-data /var/www/html/apps/groupsharemachine
+```
+
+Any directory listed in the `apps_paths` setting in `config/config.php` works, not just `apps/`. If you use a custom path, make sure its `writable` flag and ownership match how you manage the rest of your apps. Note that a **symlink** into the apps directory does not work reliably (and breaks entirely in containerised setups) — copy or bind-mount the real directory.
+
+Verify Nextcloud sees it:
+
+```bash
+sudo -u www-data php occ app:list | grep -A1 -i disabled | head
+# groupsharemachine should appear under "Disabled:"
+```
+
+### 2. Enable and configure
+
+```bash
+# enable the app — this also runs the migration that creates
+# oc_groupsharemachine_groups and oc_groupsharemachine_teachers
+sudo -u www-data php occ app:enable groupsharemachine
+
+# turn on the standard restriction so non-teachers stay constrained
+sudo -u www-data php occ config:app:set core shareapi_only_share_with_group_members --value=yes
+
+# do an initial group-type sync (afterwards a background job runs it every 15 minutes)
+sudo -u www-data php occ groupsharemachine:sync
+```
+
+`occ groupsharemachine:sync` reports something like `seen=482 kept=37 pruned=0`. `kept=0` means nothing matched — see the [Requirements](#requirements) above and the troubleshooting notes in [`DEVELOPMENT.md`](DEVELOPMENT.md).
+
+The 15-minute refresh runs as a Nextcloud background job, so it only happens if `cron.php` (or AJAX/webcron) is actually running on the instance — check with `occ background-job:list`.
+
+### 3. Verify
+
+```bash
+sudo -u www-data php occ groupsharemachine:diagnose <teacher-uid> <class-gid>
+```
+
+`virtualised by this app: YES` confirms the wiring end to end. See [Testing](#testing) below for the full check, including the negative case for students.
+
+### Upgrading
+
+Replace the app directory with the new version and let Nextcloud run any pending migrations:
+
+```bash
+sudo -u www-data php occ maintenance:mode --on
+sudo rm -rf /var/www/html/apps/groupsharemachine
+sudo tar xzf groupsharemachine.tar.gz -C /var/www/html/apps/
+sudo chown -R www-data:www-data /var/www/html/apps/groupsharemachine
+sudo -u www-data php occ upgrade
+sudo -u www-data php occ maintenance:mode --off
+```
+
+The app's own settings and tables survive the swap; there is no need to re-run the sync by hand, though `occ groupsharemachine:sync` is harmless and gives immediate feedback.
+
+### Removing
+
+```bash
+sudo -u www-data php occ app:disable groupsharemachine
+sudo rm -rf /var/www/html/apps/groupsharemachine
+```
+
+Disabling is enough to stop the membership virtualisation — from then on teachers are subject to the same share restriction as everyone else, so re-check that this is what you want before disabling on a production instance. The two `oc_groupsharemachine_*` tables are left in the database; they hold only cached LDAP-derived data and can be dropped manually if you are done with the app for good.
 
 ## Testing
 
@@ -63,5 +145,5 @@ For contributor-facing details — the two custom tables (`oc_groupsharemachine_
 
 1. Update the version in `appinfo/info.xml`
 2. Commit and tag: `git commit -m "vx.x.x" && git tag vx.x.x && git push && git push --tags`
-3. Build and sign the appstore package: `make sign` (requires certs in `~/.nextcloud/certificates/`)
-4. Upload `build/groupsharemachine.tar.gz` to the [Nextcloud App Store](https://apps.nextcloud.com/developer/apps/releases/new)
+3. Build and sign the package: `make sign` (requires certs in `~/.nextcloud/certificates/`; signing keeps `occ integrity:check-app groupsharemachine` clean on installs)
+4. Attach `build/groupsharemachine.tar.gz` to the GitHub release for the tag — that tarball is what admins install by hand (see [Installation](#installation))
