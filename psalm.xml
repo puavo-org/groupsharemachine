@@ -1,16 +1,12 @@
 <?xml version="1.0"?>
 <psalm
-		errorLevel="4"
-		resolveFromConfigFile="true"
-		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-		xmlns="https://getpsalm.org/schema/config"
-		xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
-		errorBaseline="tests/psalm-baseline.xml"
+	errorLevel="2"
+	resolveFromConfigFile="true"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="https://getpsalm.org/schema/config"
+	xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+	phpVersion="8.1"
 >
-	<!--
-	SPDX-FileCopyrightText: Tuomas Nurmi <dev@opinsys.fi>
-	SPDX-License-Identifier: CC0-1.0
-	-->
 	<projectFiles>
 		<directory name="lib" />
 		<ignoreFiles>
@@ -18,21 +14,53 @@
 		</ignoreFiles>
 	</projectFiles>
 	<extraFiles>
-		<directory name="vendor" />
-		<ignoreFiles>
-			<directory name="vendor/phpunit/php-code-coverage" />
-			<directory name="vendor/psalm" />
-		</ignoreFiles>
+		<directory name="vendor"/>
 	</extraFiles>
 	<issueHandlers>
+		<!-- Framework-registered classes (info.xml, IBootstrap, DI) look unused to psalm. -->
+		<UnusedClass>
+			<errorLevel type="suppress">
+				<directory name="lib/AppInfo" />
+				<directory name="lib/BackgroundJob" />
+				<directory name="lib/Command" />
+				<directory name="lib/Migration" />
+			</errorLevel>
+		</UnusedClass>
+		<PossiblyUnusedMethod>
+			<errorLevel type="suppress">
+				<directory name="lib" />
+			</errorLevel>
+		</PossiblyUnusedMethod>
+		<PossiblyUnusedProperty>
+			<errorLevel type="suppress">
+				<directory name="lib/Db" />
+			</errorLevel>
+		</PossiblyUnusedProperty>
+		<!-- Doctrine DBAL stubs aren't shipped in nextcloud/ocp. -->
 		<UndefinedDocblockClass>
 			<errorLevel type="suppress">
-				<referencedClass name="OC\AppFramework\OCS\BaseResponse"/>
-				<referencedClass name="Doctrine\DBAL\Schema\Schema" />
-				<referencedClass name="Doctrine\DBAL\Schema\SchemaException" />
-				<referencedClass name="Doctrine\DBAL\Driver\Statement" />
-				<referencedClass name="Doctrine\DBAL\Schema\Table" />
+				<directory name="lib/Migration" />
 			</errorLevel>
 		</UndefinedDocblockClass>
+		<!-- We deliberately reach into user_ldap (Group_Proxy, Access). Not OCP. -->
+		<MixedMethodCall>
+			<errorLevel type="suppress">
+				<file name="lib/Service/LdapSync.php" />
+			</errorLevel>
+		</MixedMethodCall>
+		<MixedAssignment>
+			<errorLevel type="suppress">
+				<file name="lib/Service/LdapSync.php" />
+				<file name="lib/Db/ClassGroupMapper.php" />
+				<file name="lib/Db/TeacherMapper.php" />
+			</errorLevel>
+		</MixedAssignment>
+		<MixedArrayAccess>
+			<errorLevel type="suppress">
+				<file name="lib/Db/ClassGroupMapper.php" />
+				<file name="lib/Db/TeacherMapper.php" />
+				<file name="lib/Service/LdapSync.php" />
+			</errorLevel>
+		</MixedArrayAccess>
 	</issueHandlers>
 </psalm>

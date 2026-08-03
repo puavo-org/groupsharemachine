@@ -1,0 +1,221 @@
+# SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Multi-school puavo-flavoured test data for the local LDAP.
+#
+# Structure:
+#   ou=Puavo,dc=planetexpress,dc=com
+#     ou=Schools          — two schools (Alpha School, Beta School)
+#     ou=People           — five users with varying affiliations + schools
+#     ou=Groups           — four class groups across the two schools
+#
+# Login passwords match the uid for every user (alice/alice, etc.).
+#
+# Coverage:
+#   - alice:   teacher in Alpha only
+#   - bob:     teacher in BOTH Alpha and Beta (multi-school)
+#   - charlie: teacher in Beta only
+#   - diana:   student in Alpha
+#   - erik:    student in Beta
+#
+#   - alpha-1a:    year class @ Alpha, members: diana
+#   - alpha-2a:    year class @ Alpha, no members
+#   - beta-1a:     year class @ Beta, members: erik
+#   - beta-math:   teaching group @ Beta, members: erik
+#
+# Expected app behaviour after sync:
+#   teachers table: 4 rows = (alice, Alpha) (bob, Alpha) (bob, Beta) (charlie, Beta)
+#   groups table:   4 rows
+#   alice  → can share to alpha-*, NOT to beta-*
+#   bob    → can share to all four
+#   charlie → can share to beta-*, NOT to alpha-*
+#   diana / erik → cannot share to any (not teachers)
+
+# ---- top-level OUs ----
+
+dn: ou=Puavo,dc=planetexpress,dc=com
+objectClass: organizationalUnit
+ou: Puavo
+
+dn: ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+objectClass: organizationalUnit
+ou: Schools
+
+dn: ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: organizationalUnit
+ou: People
+
+dn: ou=Groups,ou=Puavo,dc=planetexpress,dc=com
+objectClass: organizationalUnit
+ou: Groups
+
+# ---- schools ----
+
+dn: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: organizationalUnit
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+ou: alpha
+displayName: Alpha School
+puavoId: 200001
+
+dn: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: organizationalUnit
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+ou: beta
+displayName: Beta School
+puavoId: 200002
+
+# ---- people ----
+
+dn: puavoId=100001,ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: puavoEduPerson
+cn: Alice Anderson
+sn: Anderson
+givenName: Alice
+displayName: Alice Anderson
+uid: alice
+uidNumber: 100001
+gidNumber: 100001
+homeDirectory: /home/alice
+userPassword: alice
+mail: alice@example.test
+puavoId: 100001
+puavoEduPersonAffiliation: teacher
+puavoSchool: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+dn: puavoId=100002,ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: puavoEduPerson
+cn: Bob Brown
+sn: Brown
+givenName: Bob
+displayName: Bob Brown
+uid: bob
+uidNumber: 100002
+gidNumber: 100002
+homeDirectory: /home/bob
+userPassword: bob
+mail: bob@example.test
+puavoId: 100002
+puavoEduPersonAffiliation: teacher
+puavoSchool: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+puavoSchool: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+dn: puavoId=100003,ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: puavoEduPerson
+cn: Charlie Carter
+sn: Carter
+givenName: Charlie
+displayName: Charlie Carter
+uid: charlie
+uidNumber: 100003
+gidNumber: 100003
+homeDirectory: /home/charlie
+userPassword: charlie
+mail: charlie@example.test
+puavoId: 100003
+puavoEduPersonAffiliation: teacher
+puavoSchool: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+dn: puavoId=100004,ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: puavoEduPerson
+cn: Diana Davis
+sn: Davis
+givenName: Diana
+displayName: Diana Davis
+uid: diana
+uidNumber: 100004
+gidNumber: 100004
+homeDirectory: /home/diana
+userPassword: diana
+mail: diana@example.test
+puavoId: 100004
+puavoEduPersonAffiliation: student
+puavoSchool: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+dn: puavoId=100005,ou=People,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: puavoEduPerson
+cn: Erik Edwards
+sn: Edwards
+givenName: Erik
+displayName: Erik Edwards
+uid: erik
+uidNumber: 100005
+gidNumber: 100005
+homeDirectory: /home/erik
+userPassword: erik
+mail: erik@example.test
+puavoId: 100005
+puavoEduPersonAffiliation: student
+puavoSchool: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+# ---- class groups ----
+
+dn: puavoId=300001,ou=Groups,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: posixGroup
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+cn: alpha-1a
+displayName: 1A
+gidNumber: 300001
+puavoId: 300001
+puavoEduGroupType: year class
+puavoSchool: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+memberUid: diana
+
+dn: puavoId=300002,ou=Groups,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: posixGroup
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+cn: alpha-2a
+displayName: 2A
+gidNumber: 300002
+puavoId: 300002
+puavoEduGroupType: year class
+puavoSchool: puavoId=200001,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+
+dn: puavoId=300003,ou=Groups,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: posixGroup
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+cn: beta-1a
+displayName: 1A
+gidNumber: 300003
+puavoId: 300003
+puavoEduGroupType: year class
+puavoSchool: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+memberUid: erik
+
+dn: puavoId=300004,ou=Groups,ou=Puavo,dc=planetexpress,dc=com
+objectClass: top
+objectClass: posixGroup
+objectClass: puavoEduGroup
+objectClass: extensibleObject
+cn: beta-math
+displayName: Math (teaching group)
+gidNumber: 300004
+puavoId: 300004
+puavoEduGroupType: teaching group
+puavoSchool: puavoId=200002,ou=Schools,ou=Puavo,dc=planetexpress,dc=com
+memberUid: erik

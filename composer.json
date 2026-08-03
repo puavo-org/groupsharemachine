@@ -1,38 +1,54 @@
 {
-	"name": "nextcloud/groupshare",
-	"description": "Group Share Machine",
-	"type": "project",
+	"name": "nextcloud/groupsharemachine",
+	"description": "Let teachers share files to class groups through the native sharing UI",
 	"license": "AGPL-3.0-or-later",
 	"authors": [
 		{
-			"name": "Tuomas Nurmi"
+			"name": "Opinsys Oy",
+			"email": "dev@opinsys.fi",
+			"homepage": "https://www.opinsys.fi"
 		}
 	],
-	"require-dev": {
-		"phpunit/phpunit": "^9",
-		"sabre/dav": "^4",
-		"sabre/xml": "^2.2",
-		"symfony/event-dispatcher": "^5.3.11",
-		"nextcloud/ocp": "dev-master@dev",
-		"psalm/phar": "^4.10",
-		"nextcloud/coding-standard": "^1.0"
+	"autoload": {
+		"psr-4": {
+			"OCA\\GroupShareMachine\\": "lib/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"OCA\\GroupShareMachine\\Tests\\": "tests/"
+		}
 	},
 	"scripts": {
-		"lint": "find . -name \\*.php -not -path './vendor/*' -print0 | xargs -0 -n1 php -l",
-		"cs:check": "php-cs-fixer fix --dry-run --diff .",
-		"cs:fix": "php-cs-fixer fix .",
-		"psalm": "psalm.phar --threads=1",
-		"psalm:update-baseline": "psalm.phar --threads=1 --update-baseline",
-		"psalm:update-baseline:force": "psalm.phar --threads=1 --update-baseline --set-baseline=tests/psalm-baseline.xml",
-		"psalm:clear": "psalm.phar --clear-cache && psalm --clear-global-cache",
-		"psalm:fix": "psalm.phar --alter --issues=InvalidReturnType,InvalidNullableReturnType,MissingParamType,InvalidFalsableReturnType"
+		"post-install-cmd": [
+			"@composer bin all install --ansi"
+		],
+		"post-update-cmd": [
+			"@composer bin all install --ansi"
+		],
+		"lint": "find . -name \\*.php -not -path './vendor/*' -not -path './vendor-bin/*' -not -path './build/*' -print0 | xargs -0 -n1 php -l",
+		"cs:check": "php-cs-fixer fix --dry-run --diff",
+		"cs:fix": "php-cs-fixer fix",
+		"psalm": "psalm --threads=1 --no-cache",
+		"test:unit": "phpunit tests -c tests/phpunit.xml --colors=always --fail-on-warning --fail-on-risky",
+		"rector": "rector && composer cs:fix"
+	},
+	"require": {
+		"bamarni/composer-bin-plugin": "^1.8",
+		"php": "^8.1"
+	},
+	"require-dev": {
+		"nextcloud/ocp": "dev-stable31",
+		"roave/security-advisories": "dev-latest"
 	},
 	"config": {
 		"allow-plugins": {
-			"composer/package-versions-deprecated": true
+			"bamarni/composer-bin-plugin": true
 		},
+		"optimize-autoloader": true,
+		"sort-packages": true,
 		"platform": {
-			"php": "8.0"
+			"php": "8.1"
 		}
 	}
 }

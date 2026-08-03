@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Minimal puavo schema for the local test LDAP. Adds just the attributes and
+# auxiliary objectclasses this app reads — NOT a faithful reproduction of
+# puavo's full schema. OIDs are in the private experimental range
+# (1.3.6.1.4.1.99999.*) because these definitions never leave this dev box.
+
+dn: cn=puavoedu,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: puavoedu
+olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME 'puavoId' DESC 'Puavo numeric identifier' EQUALITY caseExactMatch SUBSTR caseExactSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.2 NAME 'puavoEduPersonAffiliation' DESC 'Puavo affiliation: teacher, student, admin, staff, ...' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.3 NAME 'puavoEduGroupType' DESC 'Puavo group type: year class, teaching group, course group, administrative group, ...' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.4 NAME 'puavoSchool' DESC 'DN of the puavo school this entry belongs to' EQUALITY distinguishedNameMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )
+olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1 NAME 'puavoEduPerson' DESC 'Person with puavo educational attributes' SUP top AUXILIARY MAY ( puavoId $ puavoEduPersonAffiliation $ puavoSchool ) )
+olcObjectClasses: ( 1.3.6.1.4.1.99999.2.2 NAME 'puavoEduGroup' DESC 'Group with puavo educational attributes' SUP top AUXILIARY MAY ( puavoId $ puavoEduGroupType $ puavoSchool ) )

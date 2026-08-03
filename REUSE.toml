@@ -1,0 +1,26 @@
+version = 1
+SPDX-PackageName = "Group Share Machine"
+SPDX-PackageSupplier = "Opinsys Oy <dev@opinsys.fi>"
+SPDX-PackageDownloadLocation = "https://github.com/puavo-org/groupsharemachine"
+
+[[annotations]]
+path = ["composer.json", "composer.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Opinsys Oy <dev@opinsys.fi>"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = [
+    ".gitignore",
+    ".php-cs-fixer.dist.php",
+    ".github/dependabot.yml",
+    "psalm.xml",
+    "rector.php",
+    "REUSE.toml",
+    "tests/phpunit.xml",
+    "vendor-bin/**/composer.json",
+    "vendor-bin/**/composer.lock",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Opinsys Oy <dev@opinsys.fi>"
+SPDX-License-Identifier = "CC0-1.0"

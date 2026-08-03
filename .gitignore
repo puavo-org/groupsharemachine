@@ -1,9 +1,16 @@
-# SPDX-FileCopyrightText: Tuomas Nurmi <dev@opinsys.fi>
-# SPDX-License-Identifier: AGPL-3.0-or-later
-.idea
-*.iml
+/.idea/
+/*.iml
+/.claude/
+
 /vendor/
+/vendor-bin/*/vendor/
+
+/.php-cs-fixer.cache
+/tests/.phpunit.cache
+
 /build/
-node_modules/
-/.php_cs.cache
-js/*hot-update.*
+
+# Local-only LDAP toggle script — contains internal staging infrastructure
+# details (hosts, agent DNs, school IDs) that must not leak into the public
+# repo. Use dev/ldap/use-docker.sh for the published test-LDAP path.
+/dev/ldap/use-staging.sh
