@@ -9,7 +9,7 @@ This guide walks through running Group Share Machine against a local Nextcloud s
 
 ## Prerequisites
 
-- Docker + Docker Compose (v1 or v2; the repo's `Makefile` defaults to v1 underscore-style container names)
+- Docker + Docker Compose (`docker compose`). Commands below are written with `sudo`; drop it if your user is in the `docker` group.
 - PHP 8.1+ and Composer 2.x (only for `composer psalm` / `composer cs:fix` / `composer rector` on the host — the dev container has its own PHP for tests via `make test`)
 - Git
 - ~10 GB free disk for the Nextcloud image, server checkout, and database volumes
@@ -27,7 +27,7 @@ cd nextcloud-docker-dev
 
 `bootstrap.sh` clones the Nextcloud server **master** branch into `workspace/server/`, copies `example.env` to `.env`, and creates the proxy + database volumes. Run it once.
 
-> The `docker compose` v2 plugin and the legacy `docker-compose` v1 binary use different container-name separators (`master-stable33-1` vs `master_stable33_1`). The repo's `Makefile` defaults to the v1 underscore form (`master_nextcloud_1`). If you have v2, override with `make sign docker_container=master-stable33-1`.
+> **Check container names, don't guess them.** With `COMPOSE_PROJECT_NAME=master` the containers are named `master-stable33-1`, `master-database-mysql-1`, and so on, but a container Compose recreates in place keeps whatever name it already had — so a long-lived stack can carry a mix of separators. Run `docker ps --format '{{.Names}}'` and use what you actually see; the `Makefile`'s `docker_container=` / `test_container=` can be overridden on the command line when they don't match.
 
 Add `nextcloud.local` and any `stableNN.local` hostnames you plan to use to `/etc/hosts`:
 
@@ -47,8 +47,8 @@ Clone each version you want before starting its container. If the container has 
 
 ```bash
 cd ~/dev/nextcloud/nextcloud-docker-dev
-docker-compose stop stable33                           # release the mount
-sudo rm -rf workspace/stable33                         # drop root-owned scaffolding
+sudo docker compose stop stable33   # release the mount
+sudo rm -rf workspace/stable33      # drop root-owned scaffolding
 git clone --depth=1 --branch stable33 \
     https://github.com/nextcloud/server.git workspace/stable33
 git -C workspace/stable33 submodule update --init      # 3rdparty etc.
@@ -84,15 +84,15 @@ services:
 
 Compose merges the `volumes:` list with the base file's, so this adds a single extra bind mount on top of the existing `apps-shared` mount. `ADDITIONAL_APPS_PATH` in `.env` can stay pointed at an empty directory (or be unset).
 
-After editing the override, force-recreate the container — `docker-compose up -d stableNN` alone reports "up-to-date" and won't pick up the new mount:
+After editing the override, force-recreate the container — `sudo docker compose up -d stableNN` alone reports "up-to-date" and won't pick up the new mount:
 
 ```bash
 cd ~/dev/nextcloud/nextcloud-docker-dev
-docker-compose up -d --force-recreate stable33
-docker-compose exec stable33 ls /var/www/html/apps-shared/groupsharemachine   # should show repo contents
+sudo docker compose up -d --force-recreate stable33
+sudo docker compose exec stable33 ls /var/www/html/apps-shared/groupsharemachine   # should show repo contents
 ```
 
-> The `Makefile` references `master_nextcloud_1` and `~/dev/nextcloud/nextcloud-docker-dev/data/shared` — those names come from this same setup (`COMPOSE_PROJECT_NAME=master` in `.env`, Compose v1 underscore separator). Keep this layout and `make sign` works unchanged.
+> The `Makefile` references a container name and `~/dev/nextcloud/nextcloud-docker-dev/data/shared` — both come from this same setup (`COMPOSE_PROJECT_NAME=master` in `.env`). Keep this layout and `make sign` works unchanged, apart from passing the container name if it differs.
 
 ## 3. Start a Nextcloud version
 
@@ -100,37 +100,37 @@ The compose file ships separate services per stable branch. After cloning `works
 
 ```bash
 cd ~/dev/nextcloud/nextcloud-docker-dev
-docker-compose up -d stable33
+sudo docker compose up -d stable33
 ```
 
 For the other supported versions (each needs its own `workspace/stableNN` clone first):
 
 ```bash
-docker-compose up -d stable31   # min supported
-docker-compose up -d stable32
+sudo docker compose up -d stable31   # min supported
+sudo docker compose up -d stable32
 ```
 
-Each service is reachable at `http://stableNN.local`. Default login is `admin` / `admin`. First boot autoinstalls Nextcloud — watch progress with `docker-compose logs -f stable33`.
+Each service is reachable at `http://stableNN.local`. Default login is `admin` / `admin`. First boot autoinstalls Nextcloud — watch progress with `sudo docker compose logs -f stable33`.
 
 ## 4. Enable the app
 
 Once the server is up, enable the app via `occ`:
 
 ```bash
-docker-compose exec -u www-data stable33 php occ app:enable groupsharemachine
+sudo docker compose exec -u www-data stable33 php occ app:enable groupsharemachine
 ```
 
 If the app does not appear in `app:list`, check the symlink target is readable from inside the container:
 
 ```bash
-docker-compose exec stable33 ls /var/www/html/apps-shared/groupsharemachine
+sudo docker compose exec stable33 ls /var/www/html/apps-shared/groupsharemachine
 ```
 
 A useful shell alias to avoid typing the prefix:
 
 ```bash
 # add to ~/.bashrc or ~/.zshrc
-ncocc() { (cd ~/dev/nextcloud/nextcloud-docker-dev && docker-compose exec -u www-data "${1:-stable33}" php occ "${@:2}"); }
+ncocc() { (cd ~/dev/nextcloud/nextcloud-docker-dev && sudo docker compose exec -u www-data "${1:-stable33}" php occ "${@:2}"); }
 # usage: ncocc stable33 app:list
 ```
 
@@ -177,7 +177,7 @@ The app relies on real LDAP-synced users and groups — there's no pure-Nextclou
 ```bash
 # 1. Bring up the LDAP service alongside stable33
 cd ~/dev/nextcloud/nextcloud-docker-dev
-docker-compose up -d ldap
+sudo docker compose up -d ldap
 
 # 2. Load the puavo schema + seed data
 cd ~/dev/nextcloud/groupsharemachine
@@ -190,7 +190,7 @@ bash dev/ldap/use-docker.sh
 #    (otherwise NC's Database backend wins authentication first)
 cd ~/dev/nextcloud/nextcloud-docker-dev
 for u in alice bob charlie diana erik john jane; do
-  docker-compose exec -T -u www-data stable33 php occ user:delete "$u" 2>/dev/null || true
+  sudo docker compose exec -T -u www-data stable33 php occ user:delete "$u" 2>/dev/null || true
 done
 ```
 
@@ -220,7 +220,7 @@ diana     1A                  (real LDAP membership; app contributes nothing)
 ### Inspect
 
 ```bash
-docker exec -t master_database-mysql_1 mysql -uroot -pnextcloud stable33 -e "
+sudo docker exec -t master-database-mysql-1 mysql -uroot -pnextcloud stable33 -e "
   SELECT * FROM oc_groupsharemachine_groups;
   SELECT * FROM oc_groupsharemachine_teachers;
 "
@@ -279,10 +279,10 @@ make            # build/groupsharemachine.tar.gz, unsigned
 make sign       # signed package (needs certs in ~/.nextcloud/certificates/)
 ```
 
-`make sign` shells into the running container named `master_nextcloud_1` to run `occ integrity:sign-app`. If your compose project is namespaced differently (e.g. you renamed the directory or use `docker compose --project-name`), the container name will differ — pass the right name in:
+`make sign` shells into the container named by `docker_container=` in the `Makefile` to run `occ integrity:sign-app`. If your compose project is namespaced differently (e.g. you renamed the directory or use `docker compose --project-name`), the container name will differ — check `docker ps` and pass the right name in:
 
 ```bash
-make sign docker_container=nextcloud-docker-dev_stable33_1
+make sign docker_container=master-stable33-1
 ```
 
 ## Troubleshooting
@@ -297,7 +297,7 @@ make sign docker_container=nextcloud-docker-dev_stable33_1
 
 **`Permission denied` writing to `data/shared/sign`** — the dev container runs as `www-data` (uid 33). The `make sign` recipe `chmod -R a+rwX`'s the sign dir before invoking `occ`; if you ran it once as root the leftover files may need `sudo rm -rf data/shared/sign` to clean up.
 
-**Container name mismatch** — Compose v1 uses underscores (`master_nextcloud_1`, matches `COMPOSE_PROJECT_NAME=master` in `.env`); v2 uses hyphens (`master-nextcloud-1`). The `Makefile` defaults to the v1 form. Run `docker ps --format '{{.Names}}'` to see what you actually have, and override `docker_container=` on the `make sign` command line.
+**Container name mismatch** — names are derived from `COMPOSE_PROJECT_NAME=master` in `.env` (e.g. `master-stable33-1`), but a container recreated in place keeps its original name, so a stack can end up with mixed separators. Run `docker ps --format '{{.Names}}'` to see what you actually have, and override `docker_container=` / `test_container=` on the `make` command line.
 
 **`Could not find a valid Nextcloud source in /var/www/html`** — `workspace/stableNN/` is empty. See section 1 — `bootstrap.sh` doesn't clone the stable branches, you have to do it yourself.
 

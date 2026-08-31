@@ -92,7 +92,20 @@ sudo -u www-data php occ config:app:set core shareapi_only_share_with_group_memb
 sudo -u www-data php occ groupsharemachine:sync
 ```
 
-`occ groupsharemachine:sync` reports something like `seen=482 kept=37 pruned=0`. `kept=0` means nothing matched — see the [Requirements](#requirements) above and the troubleshooting notes in [`DEVELOPMENT.md`](DEVELOPMENT.md).
+`occ groupsharemachine:sync` reports one line per table, e.g.:
+
+```
+Groups:   seen=500 kept=500 pruned=0
+Teachers: seen=1000 kept=1020 pruned=0
+```
+
+Reading the counters:
+
+- `seen` — LDAP entries returned by the search. The filter already restricts to class-like `puavoEduGroupType` values / to users with `puavoEduPersonAffiliation: teacher`, so `seen` is the number of relevant entries, not the size of the directory.
+- `kept` — rows written. For groups this normally equals `seen`; a lower number means some DNs did not resolve to a Nextcloud gid. For teachers it counts **(teacher, school) pairs**, so it is legitimately *higher* than `seen` when teachers belong to more than one school — and lower when teachers have no school assigned, since those cannot share to any class and are skipped.
+- `pruned` — rows deleted because they no longer exist in LDAP. Nonzero after groups or teachers are removed upstream.
+
+`kept=0` on either line means nothing matched — see the [Requirements](#requirements) above and the troubleshooting notes in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
 The 15-minute refresh runs as a Nextcloud background job, so it only happens if `cron.php` (or AJAX/webcron) is actually running on the instance — check with `occ background-job:list`.
 
