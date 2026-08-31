@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Opinsys Oy <dev@opinsys.fi>
+# SPDX-License-Identifier: CC0-1.0
+
+# App metadata. The "Update nextcloud/ocp" workflow greps this exact path to
+# decide who to mention when the dependency bump fails, so keep the line in
+# the form "<path> <owners>".
+/appinfo/info.xml @eluttine @cjoohs @ateras

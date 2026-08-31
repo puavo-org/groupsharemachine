@@ -71,18 +71,9 @@ jobs:
           title: 'Failed to update nextcloud/ocp package'
           body: 'Please check the output of the GitHub action and manually resolve the issues<br>${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}<br>${{ steps.codeowners.outputs.codeowners }}'
 
-      - name: Reset checkout 3rdparty
-        run: |
-          git clean -f 3rdparty
-          git checkout 3rdparty
-        continue-on-error: true
-
-      - name: Reset checkout vendor
-        run: |
-          git clean -f vendor
-          git checkout vendor
-        continue-on-error: true
-
+      # No 3rdparty/ here, and vendor/ is gitignored — only the vendor-bin
+      # lock files are tracked, and `composer bin all install` can rewrite
+      # them, so reset just those to keep the PR limited to the ocp bump.
       - name: Reset checkout vendor-bin
         run: |
           git clean -f vendor-bin
