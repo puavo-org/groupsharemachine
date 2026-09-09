@@ -48,7 +48,7 @@ The MySQL primary-key naming gotcha: explicit names like `gsm_groups_pk` are req
 
 Two app-owned tables in NC's main DB; both populated entirely from LDAP by `Service\LdapSync`.
 
-- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn)` — class groups (with their school for picker labels and scoping).
+- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn, display_name, abbreviation)` — class groups (with their school for picker labels and scoping). `display_name` and `abbreviation` (the LDAP `cn`) exist only to be searched: the `gid` of an LDAP group is frozen at the name it had when user_ldap first mapped it, so a group renamed later is unfindable by the name the picker shows. All three columns are matched by `searchEntriesInner()`.
 - `groupsharemachine_teachers (uid, school_dn) — composite PK` — one row per (teacher, school) authorisation. Multi-school teachers have multiple rows.
 
 The backend rejects any share where `getSchoolDn($gid)` is missing OR the (uid, school_dn) pair isn't in the teachers table. The picker only surfaces class groups whose school is in the searcher's school set. **Don't add "fallback" logic that lets unscoped rows through** — that would re-introduce cross-school leakage.

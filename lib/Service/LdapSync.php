@@ -30,6 +30,12 @@ class LdapSync {
 	public const GROUP_TYPE_ATTR = 'puavoEduGroupType';
 	public const SCHOOL_ATTR = 'puavoSchool';
 	public const SCHOOL_NAME_ATTR = 'displayName';
+	/**
+	 * puavo puts the group's short slug in cn; teachers search by it. Lowercase
+	 * already, unlike the camelCase attributes above, because LDAP records come
+	 * back keyed by lowercased attribute name.
+	 */
+	public const GROUP_ABBREVIATION_ATTR = 'cn';
 	public const AFFILIATION_ATTR = 'puavoEduPersonAffiliation';
 	public const TEACHER_AFFILIATION = 'teacher';
 
@@ -73,13 +79,29 @@ class LdapSync {
 			$this->orFilter(self::GROUP_TYPE_ATTR, self::ALLOWED_GROUP_TYPES),
 		]);
 
+		// Whatever user_ldap is configured to show as the group name. The gid is
+		// frozen at the value this attribute had when the group was first
+		// mapped, so on a renamed group the two differ and only this one matches
+		// what the teacher sees in the picker.
+		//
+		// Plain property read on purpose: user_ldap's Connection implements
+		// __get() but no __isset(), so `?? 'cn'` would evaluate isset() as false
+		// and always take the fallback, quietly discarding the real attribute.
+		$displayAttr = strtolower((string)($access->getConnection()->ldapGroupDisplayName ?: 'cn'));
+
 		$kept = [];
 		$seen = 0;
 		$offset = 0;
 		/** @var array<string, ?string> $schoolNameCache  DN -> resolved displayName (or null) */
 		$schoolNameCache = [];
 		do {
-			$records = $this->safeSearch($access, isUser: false, filter: $filter, offset: $offset);
+			$records = $this->safeSearch(
+				$access,
+				isUser: false,
+				filter: $filter,
+				offset: $offset,
+				extraAttrs: [$displayAttr, self::GROUP_ABBREVIATION_ATTR],
+			);
 			foreach ($records as $record) {
 				$seen++;
 				$dn = $record['dn'][0] ?? null;
@@ -96,7 +118,16 @@ class LdapSync {
 				if (is_string($schoolDn) && $schoolDn !== '') {
 					$schoolName = $schoolNameCache[$schoolDn] ??= $this->resolveSchoolName($access, $schoolDn);
 				}
-				$this->groupMapper->upsert($gid, $type, $schoolName, is_string($schoolDn) ? $schoolDn : '');
+				$displayName = $record[$displayAttr][0] ?? null;
+				$abbreviation = $record[self::GROUP_ABBREVIATION_ATTR][0] ?? null;
+				$this->groupMapper->upsert(
+					$gid,
+					$type,
+					$schoolName,
+					is_string($schoolDn) ? $schoolDn : '',
+					is_string($displayName) ? $displayName : null,
+					is_string($abbreviation) ? $abbreviation : null,
+				);
 				$kept[] = $gid;
 			}
 			$offset += self::PAGE_SIZE;
@@ -173,13 +204,15 @@ class LdapSync {
 	}
 
 	/**
+	 * @param list<string> $extraAttrs additional (lowercased) attributes to request
 	 * @return array
 	 */
-	private function safeSearch(object $access, bool $isUser, string $filter, int $offset): array {
+	private function safeSearch(object $access, bool $isUser, string $filter, int $offset, array $extraAttrs = []): array {
 		try {
 			$attrs = $isUser
 				? ['dn', strtolower(self::SCHOOL_ATTR)]
 				: ['dn', strtolower(self::GROUP_TYPE_ATTR), strtolower(self::SCHOOL_ATTR)];
+			$attrs = array_values(array_unique([...$attrs, ...$extraAttrs]));
 			$records = $isUser
 				? $access->searchUsers($filter, $attrs, self::PAGE_SIZE, $offset)
 				: $access->searchGroups($filter, $attrs, self::PAGE_SIZE, $offset);

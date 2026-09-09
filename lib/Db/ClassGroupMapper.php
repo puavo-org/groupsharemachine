@@ -84,7 +84,7 @@ class ClassGroupMapper extends QBMapper {
 	 * Substring-match search returning gid + school metadata. Used by the
 	 * picker plugin to render labels with school disambiguation.
 	 *
-	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string, display_name: ?string}>
 	 */
 	public function searchEntries(string $search, int $limit, int $offset): array {
 		return $this->searchEntriesInner($search, null, $limit, $offset);
@@ -95,7 +95,7 @@ class ClassGroupMapper extends QBMapper {
 	 * is in $schoolDns. Used by the picker to enforce per-school scoping.
 	 *
 	 * @param list<string> $schoolDns
-	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string, display_name: ?string}>
 	 */
 	public function searchEntriesForSchools(string $search, array $schoolDns, int $limit, int $offset): array {
 		if ($schoolDns === []) {
@@ -106,15 +106,21 @@ class ClassGroupMapper extends QBMapper {
 
 	/**
 	 * @param ?list<string> $schoolDns null = unrestricted
-	 * @return list<array{gid: string, school_name: ?string, school_dn: string}>
+	 * @return list<array{gid: string, school_name: ?string, school_dn: string, display_name: ?string}>
 	 */
 	private function searchEntriesInner(string $search, ?array $schoolDns, int $limit, int $offset): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('gid', 'school_name', 'school_dn')->from(self::TABLE);
+		$qb->select('gid', 'school_name', 'school_dn', 'display_name', 'abbreviation')->from(self::TABLE);
 		if ($search !== '') {
-			$qb->where($qb->expr()->iLike(
-				'gid',
-				$qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%'),
+			// gid alone is not enough: for LDAP groups it is frozen at the name
+			// the group had when first mapped, so a group renamed in puavo is
+			// only findable by its old name. Match the current display name and
+			// the cn/abbreviation too.
+			$pattern = $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%');
+			$qb->where($qb->expr()->orX(
+				$qb->expr()->iLike('gid', $pattern),
+				$qb->expr()->iLike('display_name', $pattern),
+				$qb->expr()->iLike('abbreviation', $pattern),
 			));
 		}
 		if ($schoolDns !== null) {
@@ -131,10 +137,12 @@ class ClassGroupMapper extends QBMapper {
 		$entries = [];
 		while (($row = $result->fetch()) !== false) {
 			$school = $row['school_name'] ?? null;
+			$displayName = $row['display_name'] ?? null;
 			$entries[] = [
 				'gid' => (string)$row['gid'],
 				'school_name' => $school === null ? null : (string)$school,
 				'school_dn' => (string)($row['school_dn'] ?? ''),
+				'display_name' => $displayName === null ? null : (string)$displayName,
 			];
 		}
 		$result->closeCursor();
@@ -174,12 +182,21 @@ class ClassGroupMapper extends QBMapper {
 		return (string)$value;
 	}
 
-	public function upsert(string $gid, string $groupType, ?string $schoolName = null, string $schoolDn = ''): void {
+	public function upsert(
+		string $gid,
+		string $groupType,
+		?string $schoolName = null,
+		string $schoolDn = '',
+		?string $displayName = null,
+		?string $abbreviation = null,
+	): void {
 		$qb = $this->db->getQueryBuilder();
 		$update = $qb->update(self::TABLE)
 			->set('group_type', $qb->createNamedParameter($groupType))
 			->set('school_name', $qb->createNamedParameter($schoolName))
 			->set('school_dn', $qb->createNamedParameter($schoolDn))
+			->set('display_name', $qb->createNamedParameter($displayName))
+			->set('abbreviation', $qb->createNamedParameter($abbreviation))
 			->where($qb->expr()->eq('gid', $qb->createNamedParameter($gid)));
 		$updated = $update->executeStatement();
 
@@ -191,6 +208,8 @@ class ClassGroupMapper extends QBMapper {
 					'group_type' => $insert->createNamedParameter($groupType),
 					'school_name' => $insert->createNamedParameter($schoolName),
 					'school_dn' => $insert->createNamedParameter($schoolDn),
+					'display_name' => $insert->createNamedParameter($displayName),
+					'abbreviation' => $insert->createNamedParameter($abbreviation),
 				])
 				->executeStatement();
 		}

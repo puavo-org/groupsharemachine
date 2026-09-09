@@ -63,9 +63,32 @@ class ClassGroupMapperTest extends TestCase {
 		usort($entries, static fn (array $a, array $b): int => strcmp($a['gid'], $b['gid']));
 
 		$this->assertSame([
-			['gid' => 'class_1a', 'school_name' => 'School A', 'school_dn' => 'puavoId=1,ou=Groups'],
-			['gid' => 'class_1b', 'school_name' => null, 'school_dn' => ''],
+			['gid' => 'class_1a', 'school_name' => 'School A', 'school_dn' => 'puavoId=1,ou=Groups', 'display_name' => null],
+			['gid' => 'class_1b', 'school_name' => null, 'school_dn' => '', 'display_name' => null],
 		], $entries);
+	}
+
+	public function testSearchMatchesRenamedGroupByDisplayNameAndAbbreviation(): void {
+		// A group renamed after it was first synced: Nextcloud froze the gid at
+		// the old name ('grp_7'), while display name and cn carry the current
+		// values. Each search below matches exactly one of the three columns.
+		$this->mapper->upsert(
+			'grp_7',
+			'year class',
+			'School Alpha',
+			'puavoId=1,ou=Groups',
+			'Class 1A',
+			'c1a-alpha',
+		);
+
+		// The name the teacher actually sees in the picker.
+		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('Class', 100, 0), 'gid'));
+		// The abbreviation, case-insensitively.
+		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('ALPHA', 100, 0), 'gid'));
+		// The stale gid keeps working, so existing habits don't break.
+		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('grp_7', 100, 0), 'gid'));
+
+		$this->assertSame([], $this->mapper->searchEntries('nomatch', 100, 0));
 	}
 
 	public function testSearchEntriesForSchoolsFiltersByDn(): void {

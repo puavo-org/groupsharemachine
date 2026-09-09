@@ -290,6 +290,7 @@ class LdapSyncTest extends TestCase {
 				return new class {
 					public string $ldapGroupFilter = '(objectClass=groupOfFakes)';
 					public string $ldapUserFilter = '(objectClass=puavoEduPerson)';
+					public string $ldapGroupDisplayName = 'displayName';
 				};
 			}
 
