@@ -8,11 +8,30 @@
 
 set -euo pipefail
 
-NC_CONTAINER="${NC_CONTAINER:-master_stable33_1}"
 PREFIX="${LDAP_PREFIX:-s01}"
+NC_SERVICE="${NC_SERVICE:-stable33}"
+
+# Fall back to sudo when the current user can't reach the docker socket.
+DOCKER="${DOCKER:-docker}"
+if ! $DOCKER info >/dev/null 2>&1 && command -v sudo >/dev/null; then
+	DOCKER="sudo docker"
+fi
+
+# Container names depend on which Compose version created them, so look the
+# name up instead of hardcoding a separator. Override with NC_CONTAINER=, or
+# pick a different server with NC_SERVICE=stable34.
+NC_CONTAINER="${NC_CONTAINER:-$($DOCKER ps --format '{{.Names}}' | grep -E "(^|[-_])${NC_SERVICE}([-_]|$)" | head -1)}"
+
+if [ -z "$NC_CONTAINER" ]; then
+	echo "No running container found for service '$NC_SERVICE'."
+	echo "Start it with: docker compose up -d $NC_SERVICE"
+	exit 1
+fi
+
+echo "==> Using Nextcloud container: $NC_CONTAINER"
 
 run_occ() {
-	docker exec -u www-data "$NC_CONTAINER" php /var/www/html/occ "$@"
+	$DOCKER exec -u www-data "$NC_CONTAINER" php /var/www/html/occ "$@"
 }
 
 set_cfg() {

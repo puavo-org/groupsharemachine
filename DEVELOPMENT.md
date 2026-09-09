@@ -169,8 +169,11 @@ The app relies on real LDAP-synced users and groups — there's no pure-Nextclou
 |---|---|
 | `dev/ldap/schema.ldif` | Adds minimal puavo schema (`puavoEduPerson`, `puavoEduGroup` aux objectclasses; `puavoId`, `puavoEduGroupType`, `puavoEduPersonAffiliation`, `puavoSchool` attributes) under cn=config. |
 | `dev/ldap/seed.ldif` | Two schools (Alpha, Beta), five users (alice/bob/charlie/diana/erik) and four class groups, designed to exercise single-school, multi-school, and cross-school-denial cases. |
-| `dev/ldap/apply.sh` | `ldapadd`s schema + seed into the running `master_ldap_1` container. Idempotent — re-running just logs "already exists" for entries already there. |
+| `dev/ldap/apply.sh` | `ldapadd`s schema + seed into the running LDAP container. Idempotent — re-running just logs "already exists" for entries already there. |
 | `dev/ldap/use-docker.sh` | Reconfigures NC's `user_ldap` to bind to the docker LDAP (`ldap:389`, anonymous bind allowed for admin). |
+| `dev/ldap/rename-group.sh` | Changes a seed group's `displayName`, to reproduce the stale-gid condition that broke class-group search — see [Reproducing the renamed-group bug](#reproducing-the-renamed-group-bug). |
+
+All three find their container via `docker ps` rather than a hardcoded name, and re-invoke docker through `sudo` if the socket isn't reachable directly. Override with `LDAP_CONTAINER=` / `NC_CONTAINER=`, or point at another server with `NC_SERVICE=stable34`.
 
 ### One-time setup
 
@@ -205,6 +208,27 @@ done
 | `erik` | `100005` | student | Beta | non-teacher |
 
 The class groups `1A` (Alpha) and `1A_2` (Beta — collision suffix added by user_ldap because both have `displayName: 1A`) intentionally share a display name to exercise the picker's school-disambiguation labels.
+
+### Reproducing the renamed-group bug
+
+Nextcloud has no stable internal id for groups: the gid is whatever `ldapGroupDisplayName` held when user_ldap first mapped the group, and it never changes afterwards. Rename the group upstream and Nextcloud shows the new name while every lookup still uses the old gid — which is why searching the share dialog for the name on screen used to return nothing.
+
+```bash
+bash dev/ldap/apply.sh                          # seed: group 300001 is "1A"
+ncocc stable33 groupsharemachine:sync           # gid frozen as "1A"
+
+bash dev/ldap/rename-group.sh 300001 'Klasse 1A'
+ncocc stable33 groupsharemachine:sync           # display_name now "Klasse 1A"
+```
+
+Verify both halves are stored:
+
+```bash
+sudo docker exec -t master-database-mysql-1 mysql -uroot -pnextcloud stable33 -e \
+  "SELECT gid, display_name, abbreviation FROM oc_groupsharemachine_groups;"
+```
+
+Expect `gid = 1A` alongside `display_name = Klasse 1A` and `abbreviation = alpha-1a`. Then log in as `alice` and type "Klasse" in a share dialog — the group must appear. Searching the stale gid (`1A`) and the abbreviation (`alpha`) must keep working too.
 
 ### Expected matrix
 
@@ -289,7 +313,7 @@ make sign docker_container=master-stable33-1
 
 **App not visible in `app:list`** — the bind mount must point to a real directory. See section 2 about `docker-compose.override.yml`.
 
-**`Class OCA\GroupShareMachine\... not found`** — `composer install` was not run in this repo, or `appinfo/info.xml` declares a namespace that doesn't match the PSR-4 autoload entry. Check `composer.json` and run `composer dump-autoload`.
+**`Class OCA\GroupShareMachine\... not found`** — most often the app is **not enabled in the container you are testing against**. `AppManager::loadApps()` registers an app's PSR-4 path only for enabled apps, and `vendor/bin/phpunit` does not load this repo's own `vendor/autoload.php`, so an unenabled app has no autoloader at all. Fix with `occ app:enable groupsharemachine` in that container (add `--force` when the container's Nextcloud is newer than `max-version` in `appinfo/info.xml`). Failing that, `composer install` was not run in this repo, or `appinfo/info.xml` declares a namespace that doesn't match the PSR-4 autoload entry — check `composer.json` and run `composer dump-autoload`.
 
 **Teacher sees no class groups in the share picker** — Run `occ groupsharemachine:diagnose <uid> <gid>`. It tells you whether the user is in the teachers table, whether the group is in the groups table, and what the backend would do. If either table is empty, run `occ groupsharemachine:sync`; if it still misses entries, check that user_ldap's Base User / Group Tree and Group-Member association are set, and that `puavoEduPersonAffiliation` / `puavoEduGroupType` exist on the corresponding LDAP entries.
 
