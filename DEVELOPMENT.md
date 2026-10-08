@@ -199,13 +199,30 @@ done
 
 ### Test accounts (passwords match the uid)
 
+**Log in with the email address, not the bare uid.** `nextcloud-docker-dev` seeds its own
+Database accounts called `alice` and `bob`, and Nextcloud consults the Database backend
+before user_ldap — so `alice` / `alice` signs you in as the *local* account, which has no
+teacher rows and therefore sees no class groups in the picker. The symptom is a share
+dialog that finds nothing, with everything else apparently configured correctly. Check
+with `occ user:info <login>`: `backend: Database` means you are on the wrong account.
+
 | Login | NC uid | Role | School(s) | Use case |
 |---|---|---|---|---|
-| `alice` | `100001` | teacher | Alpha | single-school teacher |
-| `bob` | `100002` | teacher | Alpha + Beta | multi-school teacher |
-| `charlie` | `100003` | teacher | Beta | single-school teacher |
-| `diana` | `100004` | student | Alpha | non-teacher, real-LDAP-member of `1A` |
-| `erik` | `100005` | student | Beta | non-teacher |
+| `alice@example.test` | `100001` | teacher | Alpha | single-school teacher |
+| `bob@example.test` | `100002` | teacher | Alpha + Beta | multi-school teacher |
+| `charlie@example.test` | `100003` | teacher | Beta | single-school teacher |
+| `diana@example.test` | `100004` | student | Alpha | non-teacher, real-LDAP-member of `1A` |
+| `erik@example.test` | `100005` | student | Beta | non-teacher |
+
+Email login works because `dev/ldap/use-docker.sh` sets `ldapLoginFilter` to
+`(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))`. On an instance configured
+before that change, apply it with:
+
+```bash
+sudo docker exec -u www-data master-stable33-1 php occ ldap:set-config s01 \
+    ldapLoginFilter '(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))'
+sudo docker exec -u www-data master-stable33-1 php occ ldap:set-config s01 ldapLoginFilterMode 1
+```
 
 The class groups `1A` (Alpha) and `1A_2` (Beta — collision suffix added by user_ldap because both have `displayName: 1A`) intentionally share a display name to exercise the picker's school-disambiguation labels.
 
@@ -228,9 +245,20 @@ sudo docker exec -t master-database-mysql-1 mysql -uroot -pnextcloud stable33 -e
   "SELECT gid, display_name, abbreviation FROM oc_groupsharemachine_groups;"
 ```
 
-Expect `gid = 1A` alongside `display_name = Klasse 1A` and `abbreviation = alpha-1a`. Then log in as `alice` and type "Klasse" in a share dialog — the group must appear. Searching the stale gid (`1A`) and the abbreviation (`alpha`) must keep working too.
+Expect `gid = 1A` alongside `display_name = Klasse 1A` and `abbreviation = alpha-1a`. Then log in as `alice@example.test` and type "Klasse" in a share dialog — the group must appear, and the abbreviation (`alpha`) must find it too. Before the fix, "Klasse" found nothing at all, because only the frozen gid was searched.
+
+Note that typing `1A` still finds this group, since `1A` is a substring of `Klasse 1A` — the match is on the display name, not on the gid. To watch the gid genuinely drop out of the search, rename to a name that shares nothing with the old one:
+
+```bash
+bash dev/ldap/rename-group.sh 300001 'Klasse Eins'
+ncocc stable33 groupsharemachine:sync
+```
+
+Now `1A` must return nothing for `alice@example.test` even though the row's gid is still literally `1A`, while `Eins` finds it. That is the behaviour the year-rollover case depends on: when `4. class` is renamed to `5. class` and a new `4. class` appears under gid `4. class_2`, a search for `4. class` has to return the new cohort only, never the group whose stale gid happens to spell it.
 
 ### Expected matrix
+
+With the seed exactly as shipped (no rename applied):
 
 ```
 User      Type "1A" in share dialog → picker shows
@@ -240,6 +268,8 @@ bob       1A (Alpha School)  +  1A (Beta School)
 charlie                          1A (Beta School)
 diana     1A                  (real LDAP membership; app contributes nothing)
 ```
+
+After `rename-group.sh 300001 'Klasse 1A'` the Alpha rows are labelled `Klasse 1A (Alpha School)`, because the picker labels with the group's current display name. Logins are the email addresses — see [Test accounts](#test-accounts-passwords-match-the-uid).
 
 ### Inspect
 
@@ -290,10 +320,10 @@ make test                      # phpunit inside the stable33 container
 
 `composer psalm` runs at the configured `errorLevel` — expect zero errors on this branch.
 
-`make test` shells into `master_stable33_1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
+`make test` shells into `master-stable33-1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
 
 ```bash
-make test test_container=master_stable32_1
+make test test_container=master-stable32-1
 ```
 
 ## 9. Building a release tarball
@@ -320,6 +350,27 @@ make sign docker_container=master-stable33-1
 **Share fails with "Sharing is only allowed within your own groups"** — Confirm `shareapi_only_share_with_group_members` is `yes`, then run `groupsharemachine:diagnose` for the (user, group) pair. `virtualised by this app: NO` means the backend is correctly choosing not to bypass the restriction (user not a teacher, or group not a class). `virtualised by this app: YES` but the share still fails means the share check uses a different code path — file a bug.
 
 **`Permission denied` writing to `data/shared/sign`** — the dev container runs as `www-data` (uid 33). The `make sign` recipe `chmod -R a+rwX`'s the sign dir before invoking `occ`; if you ran it once as root the leftover files may need `sudo rm -rf data/shared/sign` to clean up.
+
+**`OCP\Files\NotFoundException: The root directory of the user's files is missing`** — the user's home exists on disk but has no `files/` subdirectory, so `OC_Helper::getStorageInfo()` bails out and every page of the Files app 500s. Happens after the data directory is wiped under a running instance: the login path sees `data/<uid>/` already there and never re-runs skeleton setup. Recreate the directory and re-scan, in the container:
+
+```bash
+sudo docker exec master-stable33-1 bash -c '
+    mkdir -p /var/www/html/data/alice/files &&
+    cp -rn /skeleton/. /var/www/html/data/alice/files/ &&
+    chown -R www-data:www-data /var/www/html/data/alice'
+sudo docker exec -u www-data master-stable33-1 php occ files:scan alice
+```
+
+Copy from `/skeleton` (what `skeletondirectory` points at in this compose setup), not `core/skeleton`, which only holds `welcome.txt`. To find every account in this state rather than guessing from the error page, list the home storages that have no `files` node:
+
+```sql
+SELECT s.id FROM oc_storages s
+ WHERE s.id LIKE 'home::%'
+   AND NOT EXISTS (SELECT 1 FROM oc_filecache f
+                    WHERE f.storage = s.numeric_id AND f.path = 'files');
+```
+
+Accounts that have never logged in have no storage row at all and provision normally, so they need no repair.
 
 **Container name mismatch** — names are derived from `COMPOSE_PROJECT_NAME=master` in `.env` (e.g. `master-stable33-1`), but a container recreated in place keeps its original name, so a stack can end up with mixed separators. Run `docker ps --format '{{.Names}}'` to see what you actually have, and override `docker_container=` / `test_container=` on the `make` command line.
 

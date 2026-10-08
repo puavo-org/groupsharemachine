@@ -56,10 +56,16 @@ set_cfg ldapBaseGroups              'ou=Groups,ou=Puavo,dc=planetexpress,dc=com'
 set_cfg ldapUserFilter              '(objectClass=puavoEduPerson)'
 set_cfg ldapUserFilterObjectclass   'puavoEduPerson'
 set_cfg ldapUserFilterMode          '1'
-set_cfg ldapLoginFilter             '(&(objectClass=puavoEduPerson)(uid=%uid))'
-set_cfg ldapLoginFilterMode         '0'
+# Mail is accepted as a login name on purpose: the nextcloud-docker-dev stack
+# ships Database accounts named alice and bob, and the Database backend is
+# consulted before user_ldap, so logging in as plain "alice" lands on the local
+# account instead of the LDAP teacher. Logging in as alice@example.test is
+# unambiguous. Raw filter mode (1) because the assisted builder would overwrite
+# this from the checkboxes below.
+set_cfg ldapLoginFilter             '(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))'
+set_cfg ldapLoginFilterMode         '1'
 set_cfg ldapLoginFilterUsername     '1'
-set_cfg ldapLoginFilterEmail        '0'
+set_cfg ldapLoginFilterEmail        '1'
 set_cfg ldapAttributesForUserSearch 'displayName;uid'
 
 set_cfg ldapGroupFilter             '(&(objectClass=posixGroup)(puavoEduGroupType=*))'
