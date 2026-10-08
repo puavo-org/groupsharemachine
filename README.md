@@ -154,6 +154,8 @@ Pre-requisite: a Puavo LDAP populated with at least one teacher (`puavoEduPerson
 
 For contributor-facing details — the two custom tables (`oc_groupsharemachine_groups`, `oc_groupsharemachine_teachers`), the share-check and picker code paths we hook into, sync mechanics, and conventions — see [`AGENTS.md`](AGENTS.md).
 
+For the Nextcloud side of it — how the share dialog is answered, why the picker and the share check are separate mechanisms, and why calendars behave differently — see [`SHARING-INTERNALS.md`](SHARING-INTERNALS.md).
+
 ## Releasing a new version
 
 1. Update the version in `appinfo/info.xml`

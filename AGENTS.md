@@ -13,6 +13,8 @@ A **Puavo-specific** Nextcloud app. Lets users with `puavoEduPersonAffiliation=t
 
 Read [`DEVELOPMENT.md`](DEVELOPMENT.md) for the local dev environment (Docker Compose, user_ldap setup, sample fixtures).
 
+Read [`SHARING-INTERNALS.md`](SHARING-INTERNALS.md) for the Nextcloud code paths this app hooks into: how the sharee picker is answered, why the share check is a separate non-extensible mechanism, and the CalDAV asymmetry.
+
 ## Local commands
 
 | Command | What it does |
@@ -21,7 +23,7 @@ Read [`DEVELOPMENT.md`](DEVELOPMENT.md) for the local dev environment (Docker Co
 | `composer psalm` | Strict static analysis. Expect zero errors. |
 | `composer cs:check` | php-cs-fixer dry-run |
 | `composer cs:fix` | Apply style fixes |
-| `make test` | PHPUnit inside the `master_stable33_1` container (override `test_container=` for stable31/32) |
+| `make test` | PHPUnit inside the container named by `test_container=` in the `Makefile`; check `docker ps` and override on the command line |
 | `make` | Build `build/groupsharemachine.tar.gz` |
 | `make sign` | Same but signs via `occ integrity:sign-app` (cert in `~/.nextcloud/certificates/`) |
 
@@ -48,7 +50,10 @@ The MySQL primary-key naming gotcha: explicit names like `gsm_groups_pk` are req
 
 Two app-owned tables in NC's main DB; both populated entirely from LDAP by `Service\LdapSync`.
 
-- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn)` — class groups (with their school for picker labels and scoping).
+- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn, display_name, abbreviation)` — class groups (with their school for picker labels and scoping). `display_name` exists to be searched: the `gid` of an LDAP group is frozen at the name it had when user_ldap first mapped it, so a group renamed later is unfindable by the name the picker shows. `searchEntriesInner()` matches **`display_name` only** — the name the picker puts on screen — and deliberately neither of the other two name columns:
+
+  - **not `gid`**, because after a year rollover (`4. class` renamed to `5. class`, a new `4. class` created with gid `4. class_2`) the frozen gid is another group's current name, so matching it would offer the wrong cohort. It is used only as a fallback while `display_name` is still NULL, i.e. before the first sync after the upgrade.
+  - **not `abbreviation`** (the LDAP `cn`), because it never appears in the label. A hit on it is a result the teacher cannot account for, and it is redundant whenever it overlaps the display name. In puavo it is also often frozen at the group's original year (`cn: 1kl` on a group displayed `5. klasse`), giving it the same staleness as the gid. The column is still synced, so re-enabling the match or showing it in the label needs no migration.
 - `groupsharemachine_teachers (uid, school_dn) — composite PK` — one row per (teacher, school) authorisation. Multi-school teachers have multiple rows.
 
 The backend rejects any share where `getSchoolDn($gid)` is missing OR the (uid, school_dn) pair isn't in the teachers table. The picker only surfaces class groups whose school is in the searcher's school set. **Don't add "fallback" logic that lets unscoped rows through** — that would re-introduce cross-school leakage.
@@ -99,7 +104,8 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
    └──▶ TeacherClassSearchPlugin (this app)
            if searcher has any (uid, school_dn) rows:
               SELECT … FROM oc_groupsharemachine_groups
-              WHERE gid LIKE %search% AND school_dn IN (<teacher's schools>)
+              WHERE display_name LIKE %search%   ← never gid, never abbreviation
+                AND school_dn IN (<teacher's schools>)
               contribute each as SearchResultType('groups')
               (NOT filtered by GroupPlugin's user-groups rule — different plugin)
 ```
@@ -117,7 +123,9 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
 
 ## Testing
 
-`make test` runs PHPUnit inside the dev container because mapper tests extend `Test\TestCase` from NC core. From the host alone they can't load the NC bootstrap. The test fakes for `OCA\User_LDAP\Group_Proxy` / `User_Proxy` / `Access` are anonymous classes inside `tests/Unit/Service/LdapSyncTest.php`; extend the existing structure when adding new sync behaviour.
+`make test` runs PHPUnit inside the dev container because mapper tests extend `Test\TestCase` from NC core. From the host alone they can't load the NC bootstrap.
+
+**`make test` wipes the instance it runs against.** Core's `TestCase::tearDownAfterClass()` deletes every directory in the data dir (all user homes, `appdata_*`) and empties `oc_share` / `oc_storages` / `oc_filecache`; our mapper test truncates both app tables. It assumes a throwaway instance. Never point `test_container=` at an instance someone is browsing — the symptom is `NotFoundException: The root directory of the user's files is missing` at the next login, plus an empty share picker. Recovery is in `DEVELOPMENT.md`. The test fakes for `OCA\User_LDAP\Group_Proxy` / `User_Proxy` / `Access` are anonymous classes inside `tests/Unit/Service/LdapSyncTest.php`; extend the existing structure when adding new sync behaviour.
 
 ## Diagnostic
 

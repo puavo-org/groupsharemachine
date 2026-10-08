@@ -169,8 +169,11 @@ The app relies on real LDAP-synced users and groups — there's no pure-Nextclou
 |---|---|
 | `dev/ldap/schema.ldif` | Adds minimal puavo schema (`puavoEduPerson`, `puavoEduGroup` aux objectclasses; `puavoId`, `puavoEduGroupType`, `puavoEduPersonAffiliation`, `puavoSchool` attributes) under cn=config. |
 | `dev/ldap/seed.ldif` | Two schools (Alpha, Beta), five users (alice/bob/charlie/diana/erik) and four class groups, designed to exercise single-school, multi-school, and cross-school-denial cases. |
-| `dev/ldap/apply.sh` | `ldapadd`s schema + seed into the running `master_ldap_1` container. Idempotent — re-running just logs "already exists" for entries already there. |
+| `dev/ldap/apply.sh` | `ldapadd`s schema + seed into the running LDAP container. Idempotent — re-running just logs "already exists" for entries already there. |
 | `dev/ldap/use-docker.sh` | Reconfigures NC's `user_ldap` to bind to the docker LDAP (`ldap:389`, anonymous bind allowed for admin). |
+| `dev/ldap/rename-group.sh` | Changes a seed group's `displayName`, to reproduce the stale-gid condition that broke class-group search — see [Reproducing the renamed-group bug](#reproducing-the-renamed-group-bug). |
+
+All three find their container via `docker ps` rather than a hardcoded name, and re-invoke docker through `sudo` if the socket isn't reachable directly. Override with `LDAP_CONTAINER=` / `NC_CONTAINER=`, or point at another server with `NC_SERVICE=stable34`.
 
 ### One-time setup
 
@@ -196,17 +199,66 @@ done
 
 ### Test accounts (passwords match the uid)
 
+**Log in with the email address, not the bare uid.** `nextcloud-docker-dev` seeds its own
+Database accounts called `alice` and `bob`, and Nextcloud consults the Database backend
+before user_ldap — so `alice` / `alice` signs you in as the *local* account, which has no
+teacher rows and therefore sees no class groups in the picker. The symptom is a share
+dialog that finds nothing, with everything else apparently configured correctly. Check
+with `occ user:info <login>`: `backend: Database` means you are on the wrong account.
+
 | Login | NC uid | Role | School(s) | Use case |
 |---|---|---|---|---|
-| `alice` | `100001` | teacher | Alpha | single-school teacher |
-| `bob` | `100002` | teacher | Alpha + Beta | multi-school teacher |
-| `charlie` | `100003` | teacher | Beta | single-school teacher |
-| `diana` | `100004` | student | Alpha | non-teacher, real-LDAP-member of `1A` |
-| `erik` | `100005` | student | Beta | non-teacher |
+| `alice@example.test` | `100001` | teacher | Alpha | single-school teacher |
+| `bob@example.test` | `100002` | teacher | Alpha + Beta | multi-school teacher |
+| `charlie@example.test` | `100003` | teacher | Beta | single-school teacher |
+| `diana@example.test` | `100004` | student | Alpha | non-teacher, real-LDAP-member of `1A` |
+| `erik@example.test` | `100005` | student | Beta | non-teacher |
+
+Email login works because `dev/ldap/use-docker.sh` sets `ldapLoginFilter` to
+`(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))`. On an instance configured
+before that change, apply it with:
+
+```bash
+sudo docker exec -u www-data master-stable33-1 php occ ldap:set-config s01 \
+    ldapLoginFilter '(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))'
+sudo docker exec -u www-data master-stable33-1 php occ ldap:set-config s01 ldapLoginFilterMode 1
+```
 
 The class groups `1A` (Alpha) and `1A_2` (Beta — collision suffix added by user_ldap because both have `displayName: 1A`) intentionally share a display name to exercise the picker's school-disambiguation labels.
 
+### Reproducing the renamed-group bug
+
+Nextcloud has no stable internal id for groups: the gid is whatever `ldapGroupDisplayName` held when user_ldap first mapped the group, and it never changes afterwards. Rename the group upstream and Nextcloud shows the new name while every lookup still uses the old gid — which is why searching the share dialog for the name on screen used to return nothing.
+
+```bash
+bash dev/ldap/apply.sh                          # seed: group 300001 is "1A"
+ncocc stable33 groupsharemachine:sync           # gid frozen as "1A"
+
+bash dev/ldap/rename-group.sh 300001 'Klasse 1A'
+ncocc stable33 groupsharemachine:sync           # display_name now "Klasse 1A"
+```
+
+Verify both halves are stored:
+
+```bash
+sudo docker exec -t master-database-mysql-1 mysql -uroot -pnextcloud stable33 -e \
+  "SELECT gid, display_name, abbreviation FROM oc_groupsharemachine_groups;"
+```
+
+Expect `gid = 1A` alongside `display_name = Klasse 1A`. Then log in as `alice@example.test` and type "Klasse" in a share dialog — the group must appear. Before the fix, "Klasse" found nothing at all, because only the frozen gid was searched. Searching the abbreviation (`alpha-1a`) must **not** find it: the column is synced but not searched, because it never appears in the picker label.
+
+Note that typing `1A` still finds this group, since `1A` is a substring of `Klasse 1A` — the match is on the display name, not on the gid. To watch the gid genuinely drop out of the search, rename to a name that shares nothing with the old one:
+
+```bash
+bash dev/ldap/rename-group.sh 300001 'Klasse Eins'
+ncocc stable33 groupsharemachine:sync
+```
+
+Now `1A` must return nothing for `alice@example.test` even though the row's gid is still literally `1A`, while `Eins` finds it. That is the behaviour the year-rollover case depends on: when `4. class` is renamed to `5. class` and a new `4. class` appears under gid `4. class_2`, a search for `4. class` has to return the new cohort only, never the group whose stale gid happens to spell it.
+
 ### Expected matrix
+
+With the seed exactly as shipped (no rename applied):
 
 ```
 User      Type "1A" in share dialog → picker shows
@@ -216,6 +268,8 @@ bob       1A (Alpha School)  +  1A (Beta School)
 charlie                          1A (Beta School)
 diana     1A                  (real LDAP membership; app contributes nothing)
 ```
+
+After `rename-group.sh 300001 'Klasse 1A'` the Alpha rows are labelled `Klasse 1A (Alpha School)`, because the picker labels with the group's current display name. Logins are the email addresses — see [Test accounts](#test-accounts-passwords-match-the-uid).
 
 ### Inspect
 
@@ -264,12 +318,14 @@ composer rector                # apply rector rules, then cs:fix
 make test                      # phpunit inside the stable33 container
 ```
 
+> **`make test` is destructive to the target instance.** It deletes every user home directory and empties `oc_share` / `oc_storages` / `oc_filecache` plus both app tables — see [the troubleshooting note](#never-run-the-tests-against-an-instance-you-are-using). Use a container you are not browsing in.
+
 `composer psalm` runs at the configured `errorLevel` — expect zero errors on this branch.
 
-`make test` shells into `master_stable33_1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
+`make test` shells into `master-stable33-1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
 
 ```bash
-make test test_container=master_stable32_1
+make test test_container=master-stable32-1
 ```
 
 ## 9. Building a release tarball
@@ -289,13 +345,59 @@ make sign docker_container=master-stable33-1
 
 **App not visible in `app:list`** — the bind mount must point to a real directory. See section 2 about `docker-compose.override.yml`.
 
-**`Class OCA\GroupShareMachine\... not found`** — `composer install` was not run in this repo, or `appinfo/info.xml` declares a namespace that doesn't match the PSR-4 autoload entry. Check `composer.json` and run `composer dump-autoload`.
+**`Class OCA\GroupShareMachine\... not found`** — most often the app is **not enabled in the container you are testing against**. `AppManager::loadApps()` registers an app's PSR-4 path only for enabled apps, and `vendor/bin/phpunit` does not load this repo's own `vendor/autoload.php`, so an unenabled app has no autoloader at all. Fix with `occ app:enable groupsharemachine` in that container (add `--force` when the container's Nextcloud is newer than `max-version` in `appinfo/info.xml`). Failing that, `composer install` was not run in this repo, or `appinfo/info.xml` declares a namespace that doesn't match the PSR-4 autoload entry — check `composer.json` and run `composer dump-autoload`.
 
 **Teacher sees no class groups in the share picker** — Run `occ groupsharemachine:diagnose <uid> <gid>`. It tells you whether the user is in the teachers table, whether the group is in the groups table, and what the backend would do. If either table is empty, run `occ groupsharemachine:sync`; if it still misses entries, check that user_ldap's Base User / Group Tree and Group-Member association are set, and that `puavoEduPersonAffiliation` / `puavoEduGroupType` exist on the corresponding LDAP entries.
 
 **Share fails with "Sharing is only allowed within your own groups"** — Confirm `shareapi_only_share_with_group_members` is `yes`, then run `groupsharemachine:diagnose` for the (user, group) pair. `virtualised by this app: NO` means the backend is correctly choosing not to bypass the restriction (user not a teacher, or group not a class). `virtualised by this app: YES` but the share still fails means the share check uses a different code path — file a bug.
 
 **`Permission denied` writing to `data/shared/sign`** — the dev container runs as `www-data` (uid 33). The `make sign` recipe `chmod -R a+rwX`'s the sign dir before invoking `occ`; if you ran it once as root the leftover files may need `sudo rm -rf data/shared/sign` to clean up.
+
+**`OCP\Files\NotFoundException: The root directory of the user's files is missing`** — almost always means **`make test` has been run against the instance you are browsing**. See [Never run the tests against an instance you are using](#never-run-the-tests-against-an-instance-you-are-using) for why.
+
+The user's home exists on disk but has no `files/` subdirectory, so `OC_Helper::getStorageInfo()` bails out and every page of the Files app 500s — the login path sees `data/<uid>/` already there and never re-runs skeleton setup. Recreate the directory and re-scan, in the container:
+
+```bash
+sudo docker exec master-stable33-1 bash -c '
+    mkdir -p /var/www/html/data/<uid>/files &&
+    cp -rn /skeleton/. /var/www/html/data/<uid>/files/ &&
+    chown -R www-data:www-data /var/www/html/data/<uid>'
+sudo docker exec -u www-data master-stable33-1 php occ files:scan <uid>
+sudo docker exec -u www-data master-stable33-1 php occ groupsharemachine:sync
+```
+
+`<uid>` is the Nextcloud uid, not the login name — for LDAP accounts that is the puavoId (`100001`), not `alice`. The sync is needed because the same test run empties the app tables.
+
+Copy from `/skeleton` (what `skeletondirectory` points at in this compose setup), not `core/skeleton`, which only holds `welcome.txt`. To find every account in this state rather than guessing from the error page, list the home storages that have no `files` node:
+
+```sql
+SELECT s.id FROM oc_storages s
+ WHERE s.id LIKE 'home::%'
+   AND NOT EXISTS (SELECT 1 FROM oc_filecache f
+                    WHERE f.storage = s.numeric_id AND f.path = 'files');
+```
+
+Accounts that have never logged in have no storage row at all and provision normally, so they need no repair.
+
+**Never run the tests against an instance you are using** — the mapper tests extend `Test\TestCase` from Nextcloud core, whose `tearDownAfterClass()` cleans up after itself on the assumption that it owns a throwaway instance (`/var/www/html/tests/lib/TestCase.php`):
+
+```php
+self::tearDownAfterClassCleanShares($queryBuilder);     // DELETE FROM oc_share
+self::tearDownAfterClassCleanStorages($queryBuilder);   // DELETE FROM oc_storages
+self::tearDownAfterClassCleanFileCache($queryBuilder);  // DELETE FROM oc_filecache
+self::tearDownAfterClassCleanStrayDataFiles($dataDir);  // rm -rf everything in data/
+```
+
+`tearDownAfterClassCleanStrayDataFiles()` keeps only `nextcloud.log`, `audit.log`, `owncloud.db` and `.ocdata`, and recursively deletes every other directory in the data directory — all user homes and `appdata_*` included. On top of that `ClassGroupMapperTest` truncates both app tables in `setUp()`/`tearDown()`.
+
+So one `make test` run leaves the instance with no user home directories, an empty filecache and empty app tables. Nothing warns you; the damage only shows up at the next login as the 500 above, and as a share picker that finds no groups.
+
+Point `test_container=` at a stable container you do not browse in, and keep manual testing on another one:
+
+```bash
+make test test_container=master-stable32-1   # tests here
+# browse http://stable33.local               # manual testing there
+```
 
 **Container name mismatch** — names are derived from `COMPOSE_PROJECT_NAME=master` in `.env` (e.g. `master-stable33-1`), but a container recreated in place keeps its original name, so a stack can end up with mixed separators. Run `docker ps --format '{{.Names}}'` to see what you actually have, and override `docker_container=` / `test_container=` on the `make` command line.
 

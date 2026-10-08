@@ -5,8 +5,11 @@ app_name=groupsharemachine
 build_dir=$(CURDIR)/build
 sign_dir=$(build_dir)/sign
 cert_dir=$(HOME)/.nextcloud/certificates
-docker_container=master_nextcloud_1
-test_container=master_stable33_1
+# Container names come from COMPOSE_PROJECT_NAME=master in nextcloud-docker-dev.
+# Check `docker ps --format '{{.Names}}'` and override on the command line if
+# these don't match — a container recreated in place keeps its original name.
+docker_container=master-stable33-1
+test_container=master-stable33-1
 container_app_path=/var/www/html/apps-shared/$(app_name)
 shared_dir=$(HOME)/dev/nextcloud/nextcloud-docker-dev/data/shared
 
@@ -48,7 +51,7 @@ sign: package
 .PHONY: test
 test:
 	docker exec -u www-data $(test_container) bash -c \
-		"cd $(container_app_path) && vendor/bin/phpunit -c tests/phpunit.xml --no-coverage"
+		"cd $(container_app_path) && vendor/bin/phpunit -c tests/phpunit.xml --no-coverage --display-warnings"
 
 .PHONY: psalm
 psalm:

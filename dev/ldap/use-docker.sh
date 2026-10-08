@@ -8,11 +8,30 @@
 
 set -euo pipefail
 
-NC_CONTAINER="${NC_CONTAINER:-master_stable33_1}"
 PREFIX="${LDAP_PREFIX:-s01}"
+NC_SERVICE="${NC_SERVICE:-stable33}"
+
+# Fall back to sudo when the current user can't reach the docker socket.
+DOCKER="${DOCKER:-docker}"
+if ! $DOCKER info >/dev/null 2>&1 && command -v sudo >/dev/null; then
+	DOCKER="sudo docker"
+fi
+
+# Container names depend on which Compose version created them, so look the
+# name up instead of hardcoding a separator. Override with NC_CONTAINER=, or
+# pick a different server with NC_SERVICE=stable34.
+NC_CONTAINER="${NC_CONTAINER:-$($DOCKER ps --format '{{.Names}}' | grep -E "(^|[-_])${NC_SERVICE}([-_]|$)" | head -1)}"
+
+if [ -z "$NC_CONTAINER" ]; then
+	echo "No running container found for service '$NC_SERVICE'."
+	echo "Start it with: docker compose up -d $NC_SERVICE"
+	exit 1
+fi
+
+echo "==> Using Nextcloud container: $NC_CONTAINER"
 
 run_occ() {
-	docker exec -u www-data "$NC_CONTAINER" php /var/www/html/occ "$@"
+	$DOCKER exec -u www-data "$NC_CONTAINER" php /var/www/html/occ "$@"
 }
 
 set_cfg() {
@@ -37,10 +56,16 @@ set_cfg ldapBaseGroups              'ou=Groups,ou=Puavo,dc=planetexpress,dc=com'
 set_cfg ldapUserFilter              '(objectClass=puavoEduPerson)'
 set_cfg ldapUserFilterObjectclass   'puavoEduPerson'
 set_cfg ldapUserFilterMode          '1'
-set_cfg ldapLoginFilter             '(&(objectClass=puavoEduPerson)(uid=%uid))'
-set_cfg ldapLoginFilterMode         '0'
+# Mail is accepted as a login name on purpose: the nextcloud-docker-dev stack
+# ships Database accounts named alice and bob, and the Database backend is
+# consulted before user_ldap, so logging in as plain "alice" lands on the local
+# account instead of the LDAP teacher. Logging in as alice@example.test is
+# unambiguous. Raw filter mode (1) because the assisted builder would overwrite
+# this from the checkboxes below.
+set_cfg ldapLoginFilter             '(&(objectClass=puavoEduPerson)(|(uid=%uid)(mail=%uid)))'
+set_cfg ldapLoginFilterMode         '1'
 set_cfg ldapLoginFilterUsername     '1'
-set_cfg ldapLoginFilterEmail        '0'
+set_cfg ldapLoginFilterEmail        '1'
 set_cfg ldapAttributesForUserSearch 'displayName;uid'
 
 set_cfg ldapGroupFilter             '(&(objectClass=posixGroup)(puavoEduGroupType=*))'

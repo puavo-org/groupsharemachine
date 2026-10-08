@@ -66,7 +66,10 @@ class TeacherClassSearchPlugin implements ISearchPlugin {
 					'shareWith' => $gid,
 				],
 			];
-			if (strcasecmp($displayName, $search) === 0 || strcasecmp($gid, $search) === 0) {
+			// Only the visible name counts as an exact match. The gid is stale
+			// after a rename and may be another group's current name, so
+			// matching it here would rank an impostor above the real hit.
+			if (strcasecmp($displayName, $search) === 0) {
 				$exact[] = $entry;
 			} else {
 				$wide[] = $entry;
