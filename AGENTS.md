@@ -120,6 +120,7 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
 - Filter for users: `(&<configured>(puavoEduPersonAffiliation=teacher))`
 - Per-record school DN resolution: cached within a single sync run (see `$schoolNameCache`).
 - Background job runs every 15 minutes via `OCP\BackgroundJob\TimedJob`. Operators trigger immediate sync with `occ groupsharemachine:sync`.
+- **A failed search must never prune.** `safeSearch()` returns `null` when the LDAP search throws, as distinct from `[]` for a genuinely empty page — an empty page ends the paging loop and lets `deleteNotIn($kept)` run, so returning `[]` on failure would delete every row and blank the picker for all teachers. On `null` the sync returns early with `complete => false` and skips the prune, leaving the table as the last good run wrote it. Keep that distinction if you touch the paging loop.
 
 ## Testing
 

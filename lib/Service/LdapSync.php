@@ -52,9 +52,14 @@ class LdapSync {
 	}
 
 	/**
+	 * `complete` is false when the LDAP walk did not finish — either user_ldap
+	 * was unavailable or a search threw. Pruning is skipped in that case, so
+	 * the table keeps whatever the last good run wrote rather than being
+	 * emptied by a transient failure.
+	 *
 	 * @return array{
-	 *   groups: array{seen: int, kept: int, pruned: int},
-	 *   teachers: array{seen: int, kept: int, pruned: int},
+	 *   groups: array{seen: int, kept: int, pruned: int, complete: bool},
+	 *   teachers: array{seen: int, kept: int, pruned: int, complete: bool},
 	 * }
 	 */
 	public function run(): array {
@@ -65,7 +70,7 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
 	 */
 	private function syncGroups(): array {
 		$access = $this->resolveAccess('OCA\\User_LDAP\\Group_Proxy', isUser: false);
@@ -102,6 +107,12 @@ class LdapSync {
 				offset: $offset,
 				extraAttrs: [$displayAttr, self::GROUP_ABBREVIATION_ATTR],
 			);
+			if ($records === null) {
+				// The walk is incomplete, so $kept is not the full set of
+				// groups in LDAP. Pruning against it would delete every group
+				// we never got to read.
+				return ['seen' => $seen, 'kept' => count($kept), 'pruned' => 0, 'complete' => false];
+			}
 			foreach ($records as $record) {
 				$seen++;
 				$dn = $record['dn'][0] ?? null;
@@ -134,7 +145,7 @@ class LdapSync {
 		} while (count($records) === self::PAGE_SIZE);
 
 		$pruned = $this->groupMapper->deleteNotIn($kept);
-		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned];
+		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true];
 	}
 
 	private function resolveSchoolName(object $access, string $schoolDn): ?string {
@@ -152,7 +163,7 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
 	 */
 	private function syncTeachers(): array {
 		$access = $this->resolveAccess('OCA\\User_LDAP\\User_Proxy', isUser: true);
@@ -172,6 +183,9 @@ class LdapSync {
 		$offset = 0;
 		do {
 			$records = $this->safeSearch($access, isUser: true, filter: $filter, offset: $offset);
+			if ($records === null) {
+				return ['seen' => $seen, 'kept' => count($kept), 'pruned' => 0, 'complete' => false];
+			}
 			foreach ($records as $record) {
 				$seen++;
 				$dn = $record['dn'][0] ?? null;
@@ -200,14 +214,18 @@ class LdapSync {
 		} while (count($records) === self::PAGE_SIZE);
 
 		$pruned = $this->teacherMapper->deleteNotIn($kept);
-		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned];
+		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true];
 	}
 
 	/**
+	 * Returns null when the search failed, which the callers must not confuse
+	 * with an empty page: an empty array ends the paging loop and lets the
+	 * prune run, so returning one here would delete every row in the table.
+	 *
 	 * @param list<string> $extraAttrs additional (lowercased) attributes to request
-	 * @return array
+	 * @return ?array
 	 */
-	private function safeSearch(object $access, bool $isUser, string $filter, int $offset, array $extraAttrs = []): array {
+	private function safeSearch(object $access, bool $isUser, string $filter, int $offset, array $extraAttrs = []): ?array {
 		try {
 			$attrs = $isUser
 				? ['dn', strtolower(self::SCHOOL_ATTR)]
@@ -218,10 +236,12 @@ class LdapSync {
 				: $access->searchGroups($filter, $attrs, self::PAGE_SIZE, $offset);
 			return is_array($records) ? $records : [];
 		} catch (Throwable $e) {
-			$this->logger->warning(
-				($isUser ? 'searchUsers' : 'searchGroups') . " failed at offset {$offset}: " . $e->getMessage(),
+			$this->logger->error(
+				($isUser ? 'searchUsers' : 'searchGroups') . " failed at offset {$offset}, "
+				. 'skipping the prune for this run: ' . $e->getMessage(),
+				['exception' => $e],
 			);
-			return [];
+			return null;
 		}
 	}
 
@@ -292,9 +312,10 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
 	 */
 	private function emptyStats(): array {
-		return ['seen' => 0, 'kept' => 0, 'pruned' => 0];
+		// complete=false: nothing was read, so nothing may be pruned either.
+		return ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false];
 	}
 }

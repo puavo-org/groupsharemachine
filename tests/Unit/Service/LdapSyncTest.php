@@ -51,8 +51,8 @@ class LdapSyncTest extends TestCase {
 		// Empty users list → no User_Proxy sample → teacher sync skipped entirely.
 
 		$stats = $sync->run();
-		$this->assertSame(['seen' => 2, 'kept' => 2, 'pruned' => 0], $stats['groups']);
-		$this->assertSame(['seen' => 0, 'kept' => 0, 'pruned' => 0], $stats['teachers']);
+		$this->assertSame(['seen' => 2, 'kept' => 2, 'pruned' => 0, 'complete' => true], $stats['groups']);
+		$this->assertSame(['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false], $stats['teachers']);
 	}
 
 	public function testGroupSearchSkipsRecordsWithoutDnOrType(): void {
@@ -155,7 +155,7 @@ class LdapSyncTest extends TestCase {
 			->willReturn(0);
 
 		$stats = $sync->run();
-		$this->assertSame(['seen' => 2, 'kept' => 3, 'pruned' => 0], $stats['teachers']);
+		$this->assertSame(['seen' => 2, 'kept' => 3, 'pruned' => 0, 'complete' => true], $stats['teachers']);
 	}
 
 	public function testTeacherWithoutAnySchoolIsSkipped(): void {
@@ -227,8 +227,8 @@ class LdapSyncTest extends TestCase {
 		$stats = $sync->run();
 		$this->assertSame(
 			[
-				'groups' => ['seen' => 0, 'kept' => 0, 'pruned' => 0],
-				'teachers' => ['seen' => 0, 'kept' => 0, 'pruned' => 0],
+				'groups' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false],
+				'teachers' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false],
 			],
 			$stats,
 		);
@@ -245,15 +245,40 @@ class LdapSyncTest extends TestCase {
 		$this->assertSame(0, $stats['teachers']['seen']);
 	}
 
+	public function testFailedSearchDoesNotPruneTheTables(): void {
+		// A search that throws used to be indistinguishable from the last page
+		// of results: the loop ended with an empty $kept and deleteNotIn([])
+		// wiped every row, blanking the share picker until the next good sync.
+		$sync = $this->makeSync(
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+			],
+			users: [
+				'puavoid=20,ou=people' => ['uid' => 'teacher1', 'puavoschool' => ['puavoId=1,ou=Schools']],
+			],
+			searchThrows: true,
+		);
+
+		$this->groupMapper->expects($this->never())->method('deleteNotIn');
+		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
+
+		$stats = $sync->run();
+
+		$this->assertFalse($stats['groups']['complete']);
+		$this->assertFalse($stats['teachers']['complete']);
+		$this->assertSame(0, $stats['groups']['pruned']);
+		$this->assertSame(0, $stats['teachers']['pruned']);
+	}
+
 	/**
 	 * Build an LdapSync subclass with fake Group_Proxy / User_Proxy.
 	 *
 	 * @param array<string, array{gid: ?string, puavoedugrouptype: list<string>}> $groups DN-keyed
 	 * @param array<string, array{uid: ?string}> $users DN-keyed
 	 */
-	private function makeSync(array $groups, array $users, array $schools = []): LdapSyncTestDouble {
-		$groupAccess = $this->buildAccess($groups, $schools);
-		$userAccess = $this->buildAccess($users, []);
+	private function makeSync(array $groups, array $users, array $schools = [], bool $searchThrows = false): LdapSyncTestDouble {
+		$groupAccess = $this->buildAccess($groups, $schools, $searchThrows);
+		$userAccess = $this->buildAccess($users, [], $searchThrows);
 
 		$groupSample = array_values($groups)[0]['gid'] ?? null;
 		$userSample = array_values($users)[0]['uid'] ?? null;
@@ -272,8 +297,8 @@ class LdapSyncTest extends TestCase {
 	/**
 	 * @param array<string, array<string, mixed>> $records DN-keyed test data
 	 */
-	private function buildAccess(array $records, array $schoolDirectory): object {
-		return new class($records, $schoolDirectory) {
+	private function buildAccess(array $records, array $schoolDirectory, bool $searchThrows = false): object {
+		return new class($records, $schoolDirectory, $searchThrows) {
 			/** @var list<array<int, string>> */
 			public array $capturedFilterCalls = [];
 
@@ -283,6 +308,7 @@ class LdapSyncTest extends TestCase {
 			public function __construct(
 				private array $records,
 				private array $schoolDirectory,
+				private bool $searchThrows,
 			) {
 			}
 
@@ -300,11 +326,20 @@ class LdapSyncTest extends TestCase {
 			}
 
 			public function searchGroups(string $filter, array $attr, int $limit, int $offset): array {
+				$this->maybeThrow();
 				return $this->materialize($offset, $limit);
 			}
 
 			public function searchUsers(string $filter, array $attr, int $limit, int $offset): array {
+				$this->maybeThrow();
 				return $this->materialize($offset, $limit);
+			}
+
+			private function maybeThrow(): void {
+				if ($this->searchThrows) {
+					// What a dropped connection looks like from in here.
+					throw new \RuntimeException('Can\'t contact LDAP server');
+				}
 			}
 
 			private function materialize(int $offset, int $limit): array {
