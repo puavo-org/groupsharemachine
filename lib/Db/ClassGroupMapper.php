@@ -66,6 +66,7 @@ class ClassGroupMapper extends QBMapper {
 				$qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%'),
 			));
 		}
+		// Sort by what the picker actually shows, not by the frozen gid.
 		$qb->orderBy('gid')
 			->setMaxResults($limit > 0 ? $limit : 200)
 			->setFirstResult($offset);
@@ -112,15 +113,24 @@ class ClassGroupMapper extends QBMapper {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('gid', 'school_name', 'school_dn', 'display_name', 'abbreviation')->from(self::TABLE);
 		if ($search !== '') {
-			// gid alone is not enough: for LDAP groups it is frozen at the name
-			// the group had when first mapped, so a group renamed in puavo is
-			// only findable by its old name. Match the current display name and
-			// the cn/abbreviation too.
+			// Deliberately NOT matching gid. For LDAP groups the gid is frozen at
+			// the name the group had when user_ldap first mapped it, so after a
+			// rename it is stale — and on a year rollover ("4. class" becomes
+			// "5. class", a new "4. class" is created and gets gid "4. class_2")
+			// it is literally another group's current name. Matching it would
+			// return the advanced cohort, labelled "5. class", when a teacher
+			// searches "4. class". Match only what the group is called now.
 			$pattern = $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%');
 			$qb->where($qb->expr()->orX(
-				$qb->expr()->iLike('gid', $pattern),
 				$qb->expr()->iLike('display_name', $pattern),
 				$qb->expr()->iLike('abbreviation', $pattern),
+				// Rows written before display_name existed, or by a sync that
+				// could not read the attribute: fall back to the gid so those
+				// groups stay findable until the next sync fills it in.
+				$qb->expr()->andX(
+					$qb->expr()->isNull('display_name'),
+					$qb->expr()->iLike('gid', $pattern),
+				),
 			));
 		}
 		if ($schoolDns !== null) {
@@ -129,7 +139,8 @@ class ClassGroupMapper extends QBMapper {
 				$qb->createNamedParameter($schoolDns, IQueryBuilder::PARAM_STR_ARRAY),
 			));
 		}
-		$qb->orderBy('gid')
+		// Sort by what the picker actually shows, not by the frozen gid.
+		$qb->orderBy($qb->createFunction('COALESCE(display_name, gid)'))
 			->setMaxResults($limit > 0 ? $limit : 200)
 			->setFirstResult($offset);
 

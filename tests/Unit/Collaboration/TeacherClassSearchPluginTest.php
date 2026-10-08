@@ -188,8 +188,33 @@ class TeacherClassSearchPluginTest extends TestCase {
 				}),
 			);
 
-		// search term matches the gid exactly → exact bucket
+		// search term matches the display name exactly → exact bucket
 		$this->plugin->search('class_alpha', 100, 0, $this->searchResult);
+	}
+
+	public function testStaleGidMatchDoesNotCountAsExact(): void {
+		$teacher = $this->createMock(IUser::class);
+		$teacher->method('getUID')->willReturn('alice');
+		$this->userSession->method('getUser')->willReturn($teacher);
+		$this->teacherMapper->method('schoolsForTeacher')->willReturn(['puavoId=1,ou=Groups']);
+
+		// Renamed group: gid frozen at '4. class', now displayed as '5. class'.
+		$this->groupMapper->method('searchEntriesForSchools')
+			->willReturn([['gid' => '4. class', 'school_name' => null]]);
+		$this->groupManager->method('get')->willReturn($this->mockGroupNamed('4. class', '5. class'));
+		$this->searchResult->method('hasResult')->willReturn(false);
+
+		$this->searchResult->expects($this->once())
+			->method('addResultSet')
+			->with(
+				$this->isInstanceOf(SearchResultType::class),
+				$this->callback(static fn (array $wide): bool => count($wide) === 1),
+				[],                                              // exact — empty
+			);
+
+		// Typing the old name in full must not promote the group above a real
+		// match: that name belongs to the incoming cohort now.
+		$this->plugin->search('4. class', 100, 0, $this->searchResult);
 	}
 
 	public function testSkipsGroupsAlreadyInResult(): void {
@@ -256,9 +281,13 @@ class TeacherClassSearchPluginTest extends TestCase {
 	}
 
 	private function mockGroup(string $displayName): IGroup&MockObject {
+		return $this->mockGroupNamed($displayName, $displayName);
+	}
+
+	private function mockGroupNamed(string $gid, string $displayName): IGroup&MockObject {
 		$group = $this->createMock(IGroup::class);
 		$group->method('getDisplayName')->willReturn($displayName);
-		$group->method('getGID')->willReturn($displayName);
+		$group->method('getGID')->willReturn($gid);
 		return $group;
 	}
 }

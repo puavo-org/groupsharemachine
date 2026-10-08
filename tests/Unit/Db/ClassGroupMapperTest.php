@@ -85,10 +85,54 @@ class ClassGroupMapperTest extends TestCase {
 		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('Class', 100, 0), 'gid'));
 		// The abbreviation, case-insensitively.
 		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('ALPHA', 100, 0), 'gid'));
-		// The stale gid keeps working, so existing habits don't break.
-		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('grp_7', 100, 0), 'gid'));
+		// The stale gid is NOT searchable: it is no longer what the group is
+		// called, and may have become another group's name.
+		$this->assertSame([], $this->mapper->searchEntries('grp_7', 100, 0));
 
 		$this->assertSame([], $this->mapper->searchEntries('nomatch', 100, 0));
+	}
+
+	public function testSearchDoesNotReturnTheWrongCohortAfterAYearRollover(): void {
+		$school = 'puavoId=1,ou=Groups';
+		// The class that moved up a year: renamed to '5. class', but Nextcloud
+		// froze its gid at the name it had when first mapped.
+		$this->mapper->upsert('4. class', 'year class', 'School Alpha', $school, '5. class', 'alpha-2021');
+		// The incoming cohort now carries the freed-up name. user_ldap gave it
+		// a '_2' gid because '4. class' was already taken.
+		$this->mapper->upsert('4. class_2', 'year class', 'School Alpha', $school, '4. class', 'alpha-2022');
+
+		// Each search returns exactly the group that is called that today.
+		$this->assertSame(
+			['4. class_2'],
+			array_column($this->mapper->searchEntries('4. class', 100, 0), 'gid'),
+		);
+		$this->assertSame(
+			['4. class'],
+			array_column($this->mapper->searchEntries('5. class', 100, 0), 'gid'),
+		);
+	}
+
+	public function testSearchFallsBackToGidWhileDisplayNameIsUnset(): void {
+		// Rows written before the first sync populated display_name must stay
+		// findable, otherwise upgrading hides every group until the job runs.
+		$this->mapper->upsert('not_yet_synced', 'year class', 'School Alpha', 'puavoId=1,ou=Groups');
+
+		$this->assertSame(
+			['not_yet_synced'],
+			array_column($this->mapper->searchEntries('not_yet', 100, 0), 'gid'),
+		);
+	}
+
+	public function testSearchResultsAreOrderedByVisibleName(): void {
+		$school = 'puavoId=1,ou=Groups';
+		$this->mapper->upsert('zzz_gid', 'year class', 'School Alpha', $school, 'A class', 'a-alpha');
+		$this->mapper->upsert('aaa_gid', 'year class', 'School Alpha', $school, 'B class', 'b-alpha');
+
+		// Sorted by display_name, not by the gids they happen to be stored under.
+		$this->assertSame(
+			['zzz_gid', 'aaa_gid'],
+			array_column($this->mapper->searchEntries('class', 100, 0), 'gid'),
+		);
 	}
 
 	public function testSearchEntriesForSchoolsFiltersByDn(): void {
