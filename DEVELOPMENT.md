@@ -318,6 +318,8 @@ composer rector                # apply rector rules, then cs:fix
 make test                      # phpunit inside the stable33 container
 ```
 
+> **`make test` is destructive to the target instance.** It deletes every user home directory and empties `oc_share` / `oc_storages` / `oc_filecache` plus both app tables — see [the troubleshooting note](#never-run-the-tests-against-an-instance-you-are-using). Use a container you are not browsing in.
+
 `composer psalm` runs at the configured `errorLevel` — expect zero errors on this branch.
 
 `make test` shells into `master-stable33-1` and runs `vendor/bin/phpunit -c tests/phpunit.xml`. The mapper tests need NC's bootstrap (and a real DB), so they only work inside the container — running phpunit from the host won't load `Test\TestCase`. To target a different stable version, override `test_container=`:
@@ -351,15 +353,20 @@ make sign docker_container=master-stable33-1
 
 **`Permission denied` writing to `data/shared/sign`** — the dev container runs as `www-data` (uid 33). The `make sign` recipe `chmod -R a+rwX`'s the sign dir before invoking `occ`; if you ran it once as root the leftover files may need `sudo rm -rf data/shared/sign` to clean up.
 
-**`OCP\Files\NotFoundException: The root directory of the user's files is missing`** — the user's home exists on disk but has no `files/` subdirectory, so `OC_Helper::getStorageInfo()` bails out and every page of the Files app 500s. Happens after the data directory is wiped under a running instance: the login path sees `data/<uid>/` already there and never re-runs skeleton setup. Recreate the directory and re-scan, in the container:
+**`OCP\Files\NotFoundException: The root directory of the user's files is missing`** — almost always means **`make test` has been run against the instance you are browsing**. See [Never run the tests against an instance you are using](#never-run-the-tests-against-an-instance-you-are-using) for why.
+
+The user's home exists on disk but has no `files/` subdirectory, so `OC_Helper::getStorageInfo()` bails out and every page of the Files app 500s — the login path sees `data/<uid>/` already there and never re-runs skeleton setup. Recreate the directory and re-scan, in the container:
 
 ```bash
 sudo docker exec master-stable33-1 bash -c '
-    mkdir -p /var/www/html/data/alice/files &&
-    cp -rn /skeleton/. /var/www/html/data/alice/files/ &&
-    chown -R www-data:www-data /var/www/html/data/alice'
-sudo docker exec -u www-data master-stable33-1 php occ files:scan alice
+    mkdir -p /var/www/html/data/<uid>/files &&
+    cp -rn /skeleton/. /var/www/html/data/<uid>/files/ &&
+    chown -R www-data:www-data /var/www/html/data/<uid>'
+sudo docker exec -u www-data master-stable33-1 php occ files:scan <uid>
+sudo docker exec -u www-data master-stable33-1 php occ groupsharemachine:sync
 ```
+
+`<uid>` is the Nextcloud uid, not the login name — for LDAP accounts that is the puavoId (`100001`), not `alice`. The sync is needed because the same test run empties the app tables.
 
 Copy from `/skeleton` (what `skeletondirectory` points at in this compose setup), not `core/skeleton`, which only holds `welcome.txt`. To find every account in this state rather than guessing from the error page, list the home storages that have no `files` node:
 
@@ -371,6 +378,26 @@ SELECT s.id FROM oc_storages s
 ```
 
 Accounts that have never logged in have no storage row at all and provision normally, so they need no repair.
+
+**Never run the tests against an instance you are using** — the mapper tests extend `Test\TestCase` from Nextcloud core, whose `tearDownAfterClass()` cleans up after itself on the assumption that it owns a throwaway instance (`/var/www/html/tests/lib/TestCase.php`):
+
+```php
+self::tearDownAfterClassCleanShares($queryBuilder);     // DELETE FROM oc_share
+self::tearDownAfterClassCleanStorages($queryBuilder);   // DELETE FROM oc_storages
+self::tearDownAfterClassCleanFileCache($queryBuilder);  // DELETE FROM oc_filecache
+self::tearDownAfterClassCleanStrayDataFiles($dataDir);  // rm -rf everything in data/
+```
+
+`tearDownAfterClassCleanStrayDataFiles()` keeps only `nextcloud.log`, `audit.log`, `owncloud.db` and `.ocdata`, and recursively deletes every other directory in the data directory — all user homes and `appdata_*` included. On top of that `ClassGroupMapperTest` truncates both app tables in `setUp()`/`tearDown()`.
+
+So one `make test` run leaves the instance with no user home directories, an empty filecache and empty app tables. Nothing warns you; the damage only shows up at the next login as the 500 above, and as a share picker that finds no groups.
+
+Point `test_container=` at a stable container you do not browse in, and keep manual testing on another one:
+
+```bash
+make test test_container=master-stable32-1   # tests here
+# browse http://stable33.local               # manual testing there
+```
 
 **Container name mismatch** — names are derived from `COMPOSE_PROJECT_NAME=master` in `.env` (e.g. `master-stable33-1`), but a container recreated in place keeps its original name, so a stack can end up with mixed separators. Run `docker ps --format '{{.Names}}'` to see what you actually have, and override `docker_container=` / `test_container=` on the `make` command line.
 

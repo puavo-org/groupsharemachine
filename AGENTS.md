@@ -123,7 +123,9 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
 
 ## Testing
 
-`make test` runs PHPUnit inside the dev container because mapper tests extend `Test\TestCase` from NC core. From the host alone they can't load the NC bootstrap. The test fakes for `OCA\User_LDAP\Group_Proxy` / `User_Proxy` / `Access` are anonymous classes inside `tests/Unit/Service/LdapSyncTest.php`; extend the existing structure when adding new sync behaviour.
+`make test` runs PHPUnit inside the dev container because mapper tests extend `Test\TestCase` from NC core. From the host alone they can't load the NC bootstrap.
+
+**`make test` wipes the instance it runs against.** Core's `TestCase::tearDownAfterClass()` deletes every directory in the data dir (all user homes, `appdata_*`) and empties `oc_share` / `oc_storages` / `oc_filecache`; our mapper test truncates both app tables. It assumes a throwaway instance. Never point `test_container=` at an instance someone is browsing — the symptom is `NotFoundException: The root directory of the user's files is missing` at the next login, plus an empty share picker. Recovery is in `DEVELOPMENT.md`. The test fakes for `OCA\User_LDAP\Group_Proxy` / `User_Proxy` / `Access` are anonymous classes inside `tests/Unit/Service/LdapSyncTest.php`; extend the existing structure when adding new sync behaviour.
 
 ## Diagnostic
 
