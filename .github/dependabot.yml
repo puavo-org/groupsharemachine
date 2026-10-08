@@ -10,6 +10,11 @@ updates:
       time: "03:00"
       timezone: Europe/Paris
     open-pull-requests-limit: 10
+    # Without this the commits read "Bump x from y to z" and the
+    # "Block unconventional commits" workflow fails every dependabot PR.
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -18,3 +23,5 @@ updates:
       time: "03:00"
       timezone: Europe/Paris
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
