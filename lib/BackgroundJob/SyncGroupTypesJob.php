@@ -26,15 +26,24 @@ class SyncGroupTypesJob extends TimedJob {
 	protected function run(mixed $argument): void {
 		try {
 			$stats = $this->sync->run();
-			$this->logger->info(sprintf(
-				'groupsharemachine sync: groups(seen=%d kept=%d pruned=%d) teachers(seen=%d kept=%d pruned=%d)',
+			$message = sprintf(
+				'groupsharemachine sync: groups(seen=%d kept=%d pruned=%d complete=%s) teachers(seen=%d kept=%d pruned=%d complete=%s)',
 				$stats['groups']['seen'],
 				$stats['groups']['kept'],
 				$stats['groups']['pruned'],
+				$stats['groups']['complete'] ? 'yes' : 'no',
 				$stats['teachers']['seen'],
 				$stats['teachers']['kept'],
 				$stats['teachers']['pruned'],
-			));
+				$stats['teachers']['complete'] ? 'yes' : 'no',
+			);
+			if ($stats['groups']['complete'] && $stats['teachers']['complete']) {
+				$this->logger->info($message);
+			} else {
+				// Worth a warning: the tables are stale but intact, and will
+				// stay that way until a run completes.
+				$this->logger->warning($message . ' — prune skipped, tables left as they were');
+			}
 		} catch (Throwable $e) {
 			$this->logger->error('groupsharemachine sync failed: ' . $e->getMessage(), ['exception' => $e]);
 		}

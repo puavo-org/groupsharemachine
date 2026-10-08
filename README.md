@@ -107,6 +107,14 @@ Reading the counters:
 
 `kept=0` on either line means nothing matched — see the [Requirements](#requirements) above and the troubleshooting notes in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
+A line can also end with `INCOMPLETE (prune skipped)`:
+
+```
+Groups:   seen=120 kept=120 pruned=0  INCOMPLETE (prune skipped)
+```
+
+That means the LDAP walk did not finish — the directory became unreachable part-way, or user_ldap is not available at all. Rows are then left exactly as the last good run wrote them instead of being pruned against a partial read, because pruning against half a directory would delete every group the sync never got to see. The command exits non-zero so a cron wrapper or deploy script notices; the reason is in the Nextcloud log. Rerun once LDAP is reachable and the counters return to normal.
+
 The 15-minute refresh runs as a Nextcloud background job, so it only happens if `cron.php` (or AJAX/webcron) is actually running on the instance — check with `occ background-job:list`.
 
 ### 3. Verify
