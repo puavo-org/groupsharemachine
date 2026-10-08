@@ -245,7 +245,7 @@ sudo docker exec -t master-database-mysql-1 mysql -uroot -pnextcloud stable33 -e
   "SELECT gid, display_name, abbreviation FROM oc_groupsharemachine_groups;"
 ```
 
-Expect `gid = 1A` alongside `display_name = Klasse 1A` and `abbreviation = alpha-1a`. Then log in as `alice@example.test` and type "Klasse" in a share dialog — the group must appear, and the abbreviation (`alpha`) must find it too. Before the fix, "Klasse" found nothing at all, because only the frozen gid was searched.
+Expect `gid = 1A` alongside `display_name = Klasse 1A`. Then log in as `alice@example.test` and type "Klasse" in a share dialog — the group must appear. Before the fix, "Klasse" found nothing at all, because only the frozen gid was searched. Searching the abbreviation (`alpha-1a`) must **not** find it: the column is synced but not searched, because it never appears in the picker label.
 
 Note that typing `1A` still finds this group, since `1A` is a substring of `Klasse 1A` — the match is on the display name, not on the gid. To watch the gid genuinely drop out of the search, rename to a name that shares nothing with the old one:
 

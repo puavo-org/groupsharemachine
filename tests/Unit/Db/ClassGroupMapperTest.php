@@ -68,10 +68,11 @@ class ClassGroupMapperTest extends TestCase {
 		], $entries);
 	}
 
-	public function testSearchMatchesRenamedGroupByDisplayNameAndAbbreviation(): void {
+	public function testSearchMatchesOnlyTheVisibleName(): void {
 		// A group renamed after it was first synced: Nextcloud froze the gid at
 		// the old name ('grp_7'), while display name and cn carry the current
-		// values. Each search below matches exactly one of the three columns.
+		// values. Only the display name is searchable — it is the one of the
+		// three the picker actually puts on screen.
 		$this->mapper->upsert(
 			'grp_7',
 			'year class',
@@ -83,11 +84,12 @@ class ClassGroupMapperTest extends TestCase {
 
 		// The name the teacher actually sees in the picker.
 		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('Class', 100, 0), 'gid'));
-		// The abbreviation, case-insensitively.
-		$this->assertSame(['grp_7'], array_column($this->mapper->searchEntries('ALPHA', 100, 0), 'gid'));
 		// The stale gid is NOT searchable: it is no longer what the group is
 		// called, and may have become another group's name.
 		$this->assertSame([], $this->mapper->searchEntries('grp_7', 100, 0));
+		// Nor is the abbreviation: it never appears in the label, so a hit on
+		// it would look to the teacher like an unrelated group.
+		$this->assertSame([], $this->mapper->searchEntries('c1a-alpha', 100, 0));
 
 		$this->assertSame([], $this->mapper->searchEntries('nomatch', 100, 0));
 	}

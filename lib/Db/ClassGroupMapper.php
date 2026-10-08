@@ -113,17 +113,24 @@ class ClassGroupMapper extends QBMapper {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('gid', 'school_name', 'school_dn', 'display_name', 'abbreviation')->from(self::TABLE);
 		if ($search !== '') {
-			// Deliberately NOT matching gid. For LDAP groups the gid is frozen at
-			// the name the group had when user_ldap first mapped it, so after a
-			// rename it is stale — and on a year rollover ("4. class" becomes
-			// "5. class", a new "4. class" is created and gets gid "4. class_2")
-			// it is literally another group's current name. Matching it would
-			// return the advanced cohort, labelled "5. class", when a teacher
-			// searches "4. class". Match only what the group is called now.
+			// Match only the name the picker shows. The two other names we
+			// store are deliberately not searched:
+			//
+			//  - gid: frozen at the name the group had when user_ldap first
+			//    mapped it, so after a rename it is stale — and on a year
+			//    rollover ("4. class" becomes "5. class", a new "4. class" is
+			//    created and gets gid "4. class_2") it is literally another
+			//    group's current name. Matching it would answer a search for
+			//    "4. class" with the cohort labelled "5. class".
+			//  - abbreviation: never rendered in the picker label, so it can
+			//    only ever contribute hits the teacher cannot account for. It
+			//    adds nothing when it overlaps the display name, and when it
+			//    does not it is typically a slug frozen at the group's original
+			//    year (cn "1kl" on a group now displayed "5. klasse") — the same
+			//    staleness as the gid, with the same potential to mislead.
 			$pattern = $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($search) . '%');
 			$qb->where($qb->expr()->orX(
 				$qb->expr()->iLike('display_name', $pattern),
-				$qb->expr()->iLike('abbreviation', $pattern),
 				// Rows written before display_name existed, or by a sync that
 				// could not read the attribute: fall back to the gid so those
 				// groups stay findable until the next sync fills it in.

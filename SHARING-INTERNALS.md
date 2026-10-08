@@ -144,8 +144,8 @@ only sharing-related entry in `IRegistrationContext`, for public link pages).
   `user_ldap` first mapped the group, and a later rename updates only the
   display name — `oc_ldap_group_mapping` keeps the original. Anything that
   searches or stores gids must not assume the gid equals the visible name;
-  this app stores `display_name` and `abbreviation` alongside it for exactly
-  that reason.
+  this app stores `display_name` alongside it for exactly that reason, and
+  searches that column rather than the gid.
 - **`groupExists()` gates `inGroup()`.** A backend whose `groupExists()`
   returns `false` never gets asked about membership, and the share is denied
   with no clue as to why.

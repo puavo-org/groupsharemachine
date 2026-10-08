@@ -22,9 +22,11 @@ use OCP\Migration\SimpleMigrationStep;
  * matched nothing.
  *
  *  - display_name: current ldapGroupDisplayName value, i.e. what the picker
- *    labels the group with.
- *  - abbreviation: the group's cn, which in puavo is the short slug ("nct")
- *    admins and teachers use to refer to a school's groups.
+ *    labels the group with. This is the only column the search matches.
+ *  - abbreviation: the group's cn, which in puavo is the short slug ("nct").
+ *    Stored but not searched — see ClassGroupMapper::searchEntriesInner().
+ *    Kept so that making it searchable again, or surfacing it in the label,
+ *    needs no further migration.
  *
  * Both are refreshed on every sync and left NULL until the next one runs.
  */

@@ -50,7 +50,10 @@ The MySQL primary-key naming gotcha: explicit names like `gsm_groups_pk` are req
 
 Two app-owned tables in NC's main DB; both populated entirely from LDAP by `Service\LdapSync`.
 
-- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn, display_name, abbreviation)` — class groups (with their school for picker labels and scoping). `display_name` and `abbreviation` (the LDAP `cn`) exist only to be searched: the `gid` of an LDAP group is frozen at the name it had when user_ldap first mapped it, so a group renamed later is unfindable by the name the picker shows. `searchEntriesInner()` matches `display_name` and `abbreviation`, and **deliberately not `gid`** — after a year rollover (`4. class` renamed to `5. class`, a new `4. class` created with gid `4. class_2`) the frozen gid is another group's current name, so matching it would offer the wrong cohort. The gid is used only as a fallback while `display_name` is still NULL, i.e. before the first sync after the upgrade.
+- `groupsharemachine_groups (gid PK, group_type, school_name, school_dn, display_name, abbreviation)` — class groups (with their school for picker labels and scoping). `display_name` exists to be searched: the `gid` of an LDAP group is frozen at the name it had when user_ldap first mapped it, so a group renamed later is unfindable by the name the picker shows. `searchEntriesInner()` matches **`display_name` only** — the name the picker puts on screen — and deliberately neither of the other two name columns:
+
+  - **not `gid`**, because after a year rollover (`4. class` renamed to `5. class`, a new `4. class` created with gid `4. class_2`) the frozen gid is another group's current name, so matching it would offer the wrong cohort. It is used only as a fallback while `display_name` is still NULL, i.e. before the first sync after the upgrade.
+  - **not `abbreviation`** (the LDAP `cn`), because it never appears in the label. A hit on it is a result the teacher cannot account for, and it is redundant whenever it overlaps the display name. In puavo it is also often frozen at the group's original year (`cn: 1kl` on a group displayed `5. klasse`), giving it the same staleness as the gid. The column is still synced, so re-enabling the match or showing it in the label needs no migration.
 - `groupsharemachine_teachers (uid, school_dn) — composite PK` — one row per (teacher, school) authorisation. Multi-school teachers have multiple rows.
 
 The backend rejects any share where `getSchoolDn($gid)` is missing OR the (uid, school_dn) pair isn't in the teachers table. The picker only surfaces class groups whose school is in the searcher's school set. **Don't add "fallback" logic that lets unscoped rows through** — that would re-introduce cross-school leakage.
@@ -101,7 +104,7 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
    └──▶ TeacherClassSearchPlugin (this app)
            if searcher has any (uid, school_dn) rows:
               SELECT … FROM oc_groupsharemachine_groups
-              WHERE (display_name OR abbreviation) LIKE %search%   ← never gid
+              WHERE display_name LIKE %search%   ← never gid, never abbreviation
                 AND school_dn IN (<teacher's schools>)
               contribute each as SearchResultType('groups')
               (NOT filtered by GroupPlugin's user-groups rule — different plugin)
