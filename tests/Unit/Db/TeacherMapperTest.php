@@ -84,6 +84,61 @@ class TeacherMapperTest extends TestCase {
 		$this->assertTrue($this->mapper->belongsToSchool('bob', self::SCHOOL_A));
 	}
 
+	public function testDeleteNotInHandlesMorePairsThanTheInListLimit(): void {
+		// Same limit as the groups table, reached twice as fast here: the old
+		// predicate bound two parameters per authorisation.
+		$pairs = $this->seedPairs(1005);
+
+		$removed = $this->mapper->deleteNotIn(array_slice($pairs, 0, 1002));
+
+		$this->assertSame(3, $removed);
+		$this->assertCount(1002, $this->mapper->listPairs());
+	}
+
+	public function testDeleteNotInChunksWhenTheStalePairsExceedTheLimit(): void {
+		$pairs = $this->seedPairs(1005);
+
+		$removed = $this->mapper->deleteNotIn([$pairs[0]]);
+
+		$this->assertSame(1004, $removed);
+		$this->assertSame([$pairs[0]], $this->mapper->listPairs());
+	}
+
+	public function testDeleteNotInKeepsBothHalvesOfTheCompositeKey(): void {
+		// A pair is stale only if that exact (uid, school_dn) is gone — not
+		// because the uid appears in some other school, or vice versa.
+		$this->mapper->upsert('alice', self::SCHOOL_A);
+		$this->mapper->upsert('alice', self::SCHOOL_B);
+		$this->mapper->upsert('bob', self::SCHOOL_B);
+
+		$removed = $this->mapper->deleteNotIn([['alice', self::SCHOOL_B]]);
+
+		$this->assertSame(2, $removed);
+		$this->assertSame([['alice', self::SCHOOL_B]], $this->mapper->listPairs());
+	}
+
+	/**
+	 * @return list<array{0: string, 1: string}>
+	 */
+	private function seedPairs(int $count): array {
+		$pairs = [];
+		$this->db->beginTransaction();
+		for ($i = 0; $i < $count; $i++) {
+			$pair = [sprintf('teacher_%04d', $i), self::SCHOOL_A];
+			$qb = $this->db->getQueryBuilder();
+			$qb->insert(TeacherMapper::TABLE)
+				->values([
+					'uid' => $qb->createNamedParameter($pair[0]),
+					'school_dn' => $qb->createNamedParameter($pair[1]),
+				])
+				->executeStatement();
+			$pairs[] = $pair;
+		}
+		$this->db->commit();
+
+		return $pairs;
+	}
+
 	public function testDeleteNotInEmptyRemovesAll(): void {
 		$this->mapper->upsert('alice', self::SCHOOL_A);
 		$this->mapper->upsert('alice', self::SCHOOL_B);

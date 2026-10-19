@@ -202,6 +202,67 @@ class ClassGroupMapperTest extends TestCase {
 		$this->assertEqualsCanonicalizing(['a', 'c'], $this->mapper->listGids());
 	}
 
+	public function testDeleteNotInHandlesMoreGroupsThanTheInListLimit(): void {
+		// Nextcloud's QueryBuilder logs an error for any array parameter over
+		// 1000 values, and Oracle rejects the statement outright, so the keep
+		// set must never be sent as a single NOT IN list.
+		//
+		// Note this assertion passes on MySQL/PgSQL/SQLite either way — core
+		// only logs, it does not throw, and those databases accept the long
+		// list. What it pins down is that pruning stays correct at a size
+		// above the limit; the absence of the log entry is verified by hand.
+		$gids = $this->seedGids(1005);
+
+		// Everything still in LDAP except the last three.
+		$removed = $this->mapper->deleteNotIn(array_slice($gids, 0, 1002));
+
+		$this->assertSame(3, $removed);
+		$this->assertCount(1002, $this->mapper->listGids());
+	}
+
+	public function testDeleteNotInChunksWhenTheStaleSetExceedsTheLimit(): void {
+		// The stale set is what gets sent now, so it is the side that needs
+		// chunking: 1004 rows to delete spans two statements.
+		$gids = $this->seedGids(1005);
+
+		$removed = $this->mapper->deleteNotIn([$gids[0]]);
+
+		$this->assertSame(1004, $removed);
+		$this->assertSame([$gids[0]], $this->mapper->listGids());
+	}
+
+	public function testDeleteNotInDeletesNothingWhenEveryRowIsStillCurrent(): void {
+		$gids = $this->seedGids(5);
+
+		$this->assertSame(0, $this->mapper->deleteNotIn($gids));
+		$this->assertCount(5, $this->mapper->listGids());
+	}
+
+	/**
+	 * Insert $count rows straight through the query builder — upsert() would
+	 * issue an UPDATE and an INSERT each, which is needlessly slow at this size.
+	 *
+	 * @return list<string> the gids written, in order
+	 */
+	private function seedGids(int $count): array {
+		$gids = [];
+		$this->db->beginTransaction();
+		for ($i = 0; $i < $count; $i++) {
+			$gid = sprintf('class_%04d', $i);
+			$qb = $this->db->getQueryBuilder();
+			$qb->insert(ClassGroupMapper::TABLE)
+				->values([
+					'gid' => $qb->createNamedParameter($gid),
+					'group_type' => $qb->createNamedParameter('year class'),
+				])
+				->executeStatement();
+			$gids[] = $gid;
+		}
+		$this->db->commit();
+
+		return $gids;
+	}
+
 	public function testDeleteNotInEmptyListRemovesAll(): void {
 		$this->mapper->upsert('a', 'year class');
 		$this->mapper->upsert('b', 'year class');

@@ -17,6 +17,15 @@ class ClassGroupMapper extends QBMapper {
 
 	public const TABLE = 'groupsharemachine_groups';
 
+	/**
+	 * Nextcloud's QueryBuilder logs an error for any array parameter holding
+	 * more than 1000 values, because Oracle rejects IN lists that long. Other
+	 * databases accept them, so the only visible effect there is an
+	 * error-level log entry on every sync — but a chunked delete is correct
+	 * everywhere and costs nothing.
+	 */
+	private const DELETE_CHUNK_SIZE = 1000;
+
 	public function __construct(IDBConnection $db) {
 		parent::__construct($db, self::TABLE, TeacherClassGroup::class);
 	}
@@ -245,17 +254,34 @@ class ClassGroupMapper extends QBMapper {
 	 * groups that have disappeared from LDAP or whose puavoEduGroupType is
 	 * no longer in the allow-list.
 	 *
+	 * An empty $keep deletes every row — that is the "LDAP has no class
+	 * groups at all" case, and callers must be sure the walk completed
+	 * before passing it (see LdapSync's `complete` flag).
+	 *
 	 * @param list<string> $keep
 	 */
 	public function deleteNotIn(array $keep): int {
-		$qb = $this->db->getQueryBuilder();
-		$delete = $qb->delete(self::TABLE);
-		if ($keep !== []) {
-			$delete->where($qb->expr()->notIn(
-				'gid',
-				$qb->createNamedParameter($keep, IQueryBuilder::PARAM_STR_ARRAY),
-			));
+		if ($keep === []) {
+			$qb = $this->db->getQueryBuilder();
+			return $qb->delete(self::TABLE)->executeStatement();
 		}
-		return $delete->executeStatement();
+
+		// Work out the stale gids here rather than sending one NOT IN list of
+		// every gid we are keeping: that list grows with the directory and
+		// trips the 1000-value limit, while the stale set is almost always
+		// empty — so the usual sync now issues no DELETE at all.
+		$stale = array_values(array_diff($this->listGids(), $keep));
+
+		$deleted = 0;
+		foreach (array_chunk($stale, self::DELETE_CHUNK_SIZE) as $chunk) {
+			$qb = $this->db->getQueryBuilder();
+			$deleted += $qb->delete(self::TABLE)
+				->where($qb->expr()->in(
+					'gid',
+					$qb->createNamedParameter($chunk, IQueryBuilder::PARAM_STR_ARRAY),
+				))
+				->executeStatement();
+		}
+		return $deleted;
 	}
 }
