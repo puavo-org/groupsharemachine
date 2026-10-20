@@ -328,6 +328,23 @@ make test                      # phpunit inside the stable33 container
 make test test_container=master-stable32-1
 ```
 
+### Updating the nextcloud/ocp stub
+
+`nextcloud/ocp` provides the `OCP\*` signatures Psalm checks against. `composer.json` pins it to `dev-stable31` on purpose — the **oldest** version the app supports — so Psalm fails if we call an API that only exists in a newer Nextcloud. Bump the pin only when the supported range's floor moves.
+
+Refreshing the stub to the current stable31 snapshot is manual:
+
+```bash
+composer require --dev nextcloud/ocp:dev-stable31
+git checkout vendor-bin          # composer install rewrites these locks; keep
+git clean -f vendor-bin          # the change limited to composer.lock
+composer psalm
+```
+
+Then open a PR with the `composer.lock` change alone.
+
+This used to be a pair of workflows copied from the `nextcloud/.github` templates. They were removed because they could not work here: the templates expect a `COMMAND_BOT_PAT` secret holding a bot account's token, and without it `peter-evans/create-pull-request` falls back to `GITHUB_TOKEN` — whose events GitHub refuses to let trigger further workflows, so every PR they opened was born with zero checks and could never be merged. Nothing ran them automatically either; both were `workflow_dispatch` only.
+
 ## 9. Building a release tarball
 
 ```bash
