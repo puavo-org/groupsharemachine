@@ -169,14 +169,12 @@ class LdapSyncTest extends TestCase {
 		);
 
 		$this->teacherMapper->expects($this->never())->method('upsert');
-		// ...and because that leaves nothing to keep, the prune is refused
-		// rather than emptying the table. Before the guard this called
-		// deleteNotIn([]), which deleted every row.
-		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
+		// Nothing to keep — and nothing stored either, so there is nothing to
+		// protect and the prune runs as normal. (With rows stored it would be
+		// refused; see testCompletedWalkThatMatchesNothingDoesNotPrune.)
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')->with([]);
 
-		$stats = $sync->run();
-
-		$this->assertFalse($stats['teachers']['complete']);
+		$sync->run();
 	}
 
 	public function testTeacherSearchSkipsRecordsWithoutDn(): void {
@@ -293,10 +291,11 @@ class LdapSyncTest extends TestCase {
 			emptySearch: true,
 		);
 
-		$this->groupMapper->expects($this->never())->method('deleteNotIn');
-		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
+		// Rows are stored, so there is something to lose and the guard applies.
 		$this->groupMapper->method('listGids')->willReturn(['class_1a', 'class_2b']);
 		$this->teacherMapper->method('listPairs')->willReturn([['alice', 'puavoId=1,ou=Schools']]);
+		$this->groupMapper->expects($this->never())->method('deleteNotIn');
+		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
 
 		$stats = $sync->run();
 
@@ -307,6 +306,33 @@ class LdapSyncTest extends TestCase {
 		$this->assertSame(0, $stats['teachers']['pruned']);
 		$this->assertFalse($stats['teachers']['complete']);
 		$this->assertStringContainsString(LdapSync::AFFILIATION_ATTR, (string)$stats['teachers']['reason']);
+	}
+
+	public function testEmptyResultAgainstEmptyTablesIsNotTreatedAsFailure(): void {
+		// Same empty walk, but nothing is stored yet — a directory still being
+		// populated. There are no rows to lose, so refusing would be a false
+		// alarm during provisioning: report it plainly and succeed.
+		$sync = $this->makeSync(
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+			],
+			users: [
+				'puavoid=20,ou=people' => ['uid' => 'teacher1', 'puavoschool' => ['puavoId=1,ou=Schools']],
+			],
+			emptySearch: true,
+		);
+
+		$this->groupMapper->method('listGids')->willReturn([]);
+		$this->teacherMapper->method('listPairs')->willReturn([]);
+		$this->groupMapper->expects($this->once())->method('deleteNotIn')->with([])->willReturn(0);
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')->with([])->willReturn(0);
+
+		$stats = $sync->run();
+
+		$this->assertTrue($stats['groups']['complete']);
+		$this->assertNull($stats['groups']['reason']);
+		$this->assertTrue($stats['teachers']['complete']);
+		$this->assertNull($stats['teachers']['reason']);
 	}
 
 	/**

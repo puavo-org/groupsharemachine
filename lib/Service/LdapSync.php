@@ -153,27 +153,34 @@ class LdapSync {
 			$offset += self::PAGE_SIZE;
 		} while (count($records) === self::PAGE_SIZE);
 
+		// The walk finished and nothing threw, but matched nothing either. A
+		// Puavo directory with no class groups at all is not a state this app
+		// is deployed into: far more likely the group types were renamed
+		// upstream, or the bind agent lost read access to puavoEduGroupType —
+		// both leave user_ldap listing groups happily while our filter matches
+		// none. Pruning would then empty the table and blank every teacher's
+		// picker, so refuse.
+		//
+		// Only when there are rows to lose, though. On a directory still being
+		// populated the table is empty too, and failing a sync that had nothing
+		// to protect would just be a false alarm during provisioning.
 		if ($kept === []) {
-			// The walk finished, so nothing threw — but a Puavo directory with
-			// no class groups at all is not a state this app is deployed into.
-			// Far more likely the group types were renamed upstream, or the
-			// bind agent lost read access to puavoEduGroupType: both leave
-			// user_ldap listing groups happily while our filter matches none.
-			// Pruning here would empty the table and blank every teacher's
-			// picker, so refuse and let the operator look.
-			$this->logger->warning(
-				'LDAP walk completed but matched no class groups; refusing to prune '
-				. count($this->groupMapper->listGids()) . ' stored rows. Check that '
-				. self::GROUP_TYPE_ATTR . ' still carries one of: '
-				. implode(', ', self::ALLOWED_GROUP_TYPES),
-			);
-			return [
-				'seen' => $seen,
-				'kept' => 0,
-				'pruned' => 0,
-				'complete' => false,
-				'reason' => 'no class groups matched — check ' . self::GROUP_TYPE_ATTR,
-			];
+			$stored = count($this->groupMapper->listGids());
+			if ($stored > 0) {
+				$this->logger->warning(
+					'LDAP walk completed but matched no class groups; refusing to prune '
+					. $stored . ' stored rows. Check that '
+					. self::GROUP_TYPE_ATTR . ' still carries one of: '
+					. implode(', ', self::ALLOWED_GROUP_TYPES),
+				);
+				return [
+					'seen' => $seen,
+					'kept' => 0,
+					'pruned' => 0,
+					'complete' => false,
+					'reason' => 'no class groups matched — check ' . self::GROUP_TYPE_ATTR,
+				];
+			}
 		}
 
 		$pruned = $this->groupMapper->deleteNotIn($kept);
@@ -251,22 +258,25 @@ class LdapSync {
 			$offset += self::PAGE_SIZE;
 		} while (count($records) === self::PAGE_SIZE);
 
+		// Same reasoning as the group side: no teachers at all means the
+		// affiliation filter stopped matching, not that the school let
+		// everyone go — but only worth failing over if rows would be lost.
 		if ($kept === []) {
-			// Same reasoning as the group side: no teachers at all means the
-			// affiliation filter stopped matching, not that the school fired
-			// everyone.
-			$this->logger->warning(
-				'LDAP walk completed but matched no teachers; refusing to prune '
-				. count($this->teacherMapper->listPairs()) . ' stored rows. Check that '
-				. self::AFFILIATION_ATTR . ' still contains "' . self::TEACHER_AFFILIATION . '"',
-			);
-			return [
-				'seen' => $seen,
-				'kept' => 0,
-				'pruned' => 0,
-				'complete' => false,
-				'reason' => 'no teachers matched — check ' . self::AFFILIATION_ATTR,
-			];
+			$stored = count($this->teacherMapper->listPairs());
+			if ($stored > 0) {
+				$this->logger->warning(
+					'LDAP walk completed but matched no teachers; refusing to prune '
+					. $stored . ' stored rows. Check that '
+					. self::AFFILIATION_ATTR . ' still contains "' . self::TEACHER_AFFILIATION . '"',
+				);
+				return [
+					'seen' => $seen,
+					'kept' => 0,
+					'pruned' => 0,
+					'complete' => false,
+					'reason' => 'no teachers matched — check ' . self::AFFILIATION_ATTR,
+				];
+			}
 		}
 
 		$pruned = $this->teacherMapper->deleteNotIn($kept);

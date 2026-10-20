@@ -121,7 +121,7 @@ The sync prunes only when the run produced a trustworthy picture of LDAP. It ref
 
 In all three the rows stay exactly as the last good run wrote them, so **sharing keeps working on the previous data** while the cause is found — pruning instead would empty the table and blank every teacher's picker. The command exits non-zero so a cron wrapper or deploy script notices, and the Nextcloud log carries a warning naming the attribute to check. Fix the cause and rerun; one sync restores the counters.
 
-> If your deployment legitimately has no class groups yet — a directory still being populated — the sync will report this and exit non-zero until the first one exists. That is intentional: there is nothing to prune against, so refusing is the safe reading.
+The "nothing matched" refusal only applies when there are rows to lose. On a directory still being populated both the table and the result are empty, so there is nothing to protect — the sync reports `seen=0 kept=0` and exits 0, as it always did. Check `kept` on a first run: a zero there still means the filters need attention.
 
 The 15-minute refresh runs as a Nextcloud background job, so it only happens if `cron.php` (or AJAX/webcron) is actually running on the instance — check with `occ background-job:list`.
 
