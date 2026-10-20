@@ -46,7 +46,7 @@ Either build a tarball from a checkout (on any machine with `make`):
 ```bash
 git clone https://github.com/puavo-org/groupsharemachine.git
 cd groupsharemachine
-git checkout v1.0.0          # or the version you want
+git checkout v1.0.2          # or the version you want
 make                         # -> build/groupsharemachine.tar.gz
 ```
 
