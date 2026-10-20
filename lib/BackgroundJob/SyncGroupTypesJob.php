@@ -41,8 +41,14 @@ class SyncGroupTypesJob extends TimedJob {
 				$this->logger->info($message);
 			} else {
 				// Worth a warning: the tables are stale but intact, and will
-				// stay that way until a run completes.
-				$this->logger->warning($message . ' — prune skipped, tables left as they were');
+				// stay that way until a run produces a result worth pruning
+				// against. Name the reason — this job is the only place most
+				// operators will ever see it.
+				$reasons = array_filter([$stats['groups']['reason'], $stats['teachers']['reason']]);
+				$this->logger->warning(
+					$message . ' — prune skipped, tables left as they were: '
+					. implode('; ', $reasons),
+				);
 			}
 		} catch (Throwable $e) {
 			$this->logger->error('groupsharemachine sync failed: ' . $e->getMessage(), ['exception' => $e]);

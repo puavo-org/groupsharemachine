@@ -52,14 +52,17 @@ class LdapSync {
 	}
 
 	/**
-	 * `complete` is false when the LDAP walk did not finish — either user_ldap
-	 * was unavailable or a search threw. Pruning is skipped in that case, so
-	 * the table keeps whatever the last good run wrote rather than being
-	 * emptied by a transient failure.
+	 * `complete` is false when this run's result is not trustworthy enough to
+	 * prune against: user_ldap was unavailable, a search threw, or the walk
+	 * finished but matched nothing at all. Pruning is skipped in all three
+	 * cases, so the table keeps whatever the last good run wrote rather than
+	 * being emptied by a transient failure or an upstream change.
+	 *
+	 * `reason` names why, for the operator; it is null on a trustworthy run.
 	 *
 	 * @return array{
-	 *   groups: array{seen: int, kept: int, pruned: int, complete: bool},
-	 *   teachers: array{seen: int, kept: int, pruned: int, complete: bool},
+	 *   groups: array{seen: int, kept: int, pruned: int, complete: bool, reason: ?string},
+	 *   teachers: array{seen: int, kept: int, pruned: int, complete: bool, reason: ?string},
 	 * }
 	 */
 	public function run(): array {
@@ -70,7 +73,7 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool, reason: ?string}
 	 */
 	private function syncGroups(): array {
 		$access = $this->resolveAccess('OCA\\User_LDAP\\Group_Proxy', isUser: false);
@@ -111,7 +114,13 @@ class LdapSync {
 				// The walk is incomplete, so $kept is not the full set of
 				// groups in LDAP. Pruning against it would delete every group
 				// we never got to read.
-				return ['seen' => $seen, 'kept' => count($kept), 'pruned' => 0, 'complete' => false];
+				return [
+					'seen' => $seen,
+					'kept' => count($kept),
+					'pruned' => 0,
+					'complete' => false,
+					'reason' => 'the LDAP search failed part-way',
+				];
 			}
 			foreach ($records as $record) {
 				$seen++;
@@ -144,8 +153,31 @@ class LdapSync {
 			$offset += self::PAGE_SIZE;
 		} while (count($records) === self::PAGE_SIZE);
 
+		if ($kept === []) {
+			// The walk finished, so nothing threw — but a Puavo directory with
+			// no class groups at all is not a state this app is deployed into.
+			// Far more likely the group types were renamed upstream, or the
+			// bind agent lost read access to puavoEduGroupType: both leave
+			// user_ldap listing groups happily while our filter matches none.
+			// Pruning here would empty the table and blank every teacher's
+			// picker, so refuse and let the operator look.
+			$this->logger->warning(
+				'LDAP walk completed but matched no class groups; refusing to prune '
+				. count($this->groupMapper->listGids()) . ' stored rows. Check that '
+				. self::GROUP_TYPE_ATTR . ' still carries one of: '
+				. implode(', ', self::ALLOWED_GROUP_TYPES),
+			);
+			return [
+				'seen' => $seen,
+				'kept' => 0,
+				'pruned' => 0,
+				'complete' => false,
+				'reason' => 'no class groups matched — check ' . self::GROUP_TYPE_ATTR,
+			];
+		}
+
 		$pruned = $this->groupMapper->deleteNotIn($kept);
-		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true];
+		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true, 'reason' => null];
 	}
 
 	private function resolveSchoolName(object $access, string $schoolDn): ?string {
@@ -163,7 +195,7 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool, reason: ?string}
 	 */
 	private function syncTeachers(): array {
 		$access = $this->resolveAccess('OCA\\User_LDAP\\User_Proxy', isUser: true);
@@ -184,7 +216,13 @@ class LdapSync {
 		do {
 			$records = $this->safeSearch($access, isUser: true, filter: $filter, offset: $offset);
 			if ($records === null) {
-				return ['seen' => $seen, 'kept' => count($kept), 'pruned' => 0, 'complete' => false];
+				return [
+					'seen' => $seen,
+					'kept' => count($kept),
+					'pruned' => 0,
+					'complete' => false,
+					'reason' => 'the LDAP search failed part-way',
+				];
 			}
 			foreach ($records as $record) {
 				$seen++;
@@ -213,8 +251,26 @@ class LdapSync {
 			$offset += self::PAGE_SIZE;
 		} while (count($records) === self::PAGE_SIZE);
 
+		if ($kept === []) {
+			// Same reasoning as the group side: no teachers at all means the
+			// affiliation filter stopped matching, not that the school fired
+			// everyone.
+			$this->logger->warning(
+				'LDAP walk completed but matched no teachers; refusing to prune '
+				. count($this->teacherMapper->listPairs()) . ' stored rows. Check that '
+				. self::AFFILIATION_ATTR . ' still contains "' . self::TEACHER_AFFILIATION . '"',
+			);
+			return [
+				'seen' => $seen,
+				'kept' => 0,
+				'pruned' => 0,
+				'complete' => false,
+				'reason' => 'no teachers matched — check ' . self::AFFILIATION_ATTR,
+			];
+		}
+
 		$pruned = $this->teacherMapper->deleteNotIn($kept);
-		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true];
+		return ['seen' => $seen, 'kept' => count($kept), 'pruned' => $pruned, 'complete' => true, 'reason' => null];
 	}
 
 	/**
@@ -312,10 +368,16 @@ class LdapSync {
 	}
 
 	/**
-	 * @return array{seen: int, kept: int, pruned: int, complete: bool}
+	 * @return array{seen: int, kept: int, pruned: int, complete: bool, reason: ?string}
 	 */
 	private function emptyStats(): array {
 		// complete=false: nothing was read, so nothing may be pruned either.
-		return ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false];
+		return [
+			'seen' => 0,
+			'kept' => 0,
+			'pruned' => 0,
+			'complete' => false,
+			'reason' => 'user_ldap is unavailable or returned no groups to work from',
+		];
 	}
 }
