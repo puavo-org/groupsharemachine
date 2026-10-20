@@ -51,8 +51,9 @@ class LdapSyncTest extends TestCase {
 		// Empty users list → no User_Proxy sample → teacher sync skipped entirely.
 
 		$stats = $sync->run();
-		$this->assertSame(['seen' => 2, 'kept' => 2, 'pruned' => 0, 'complete' => true], $stats['groups']);
-		$this->assertSame(['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false], $stats['teachers']);
+		$this->assertSame(['seen' => 2, 'kept' => 2, 'pruned' => 0, 'complete' => true, 'reason' => null], $stats['groups']);
+		$this->assertSame(false, $stats['teachers']['complete']);
+		$this->assertNotNull($stats['teachers']['reason']);
 	}
 
 	public function testGroupSearchSkipsRecordsWithoutDnOrType(): void {
@@ -155,7 +156,7 @@ class LdapSyncTest extends TestCase {
 			->willReturn(0);
 
 		$stats = $sync->run();
-		$this->assertSame(['seen' => 2, 'kept' => 3, 'pruned' => 0, 'complete' => true], $stats['teachers']);
+		$this->assertSame(['seen' => 2, 'kept' => 3, 'pruned' => 0, 'complete' => true, 'reason' => null], $stats['teachers']);
 	}
 
 	public function testTeacherWithoutAnySchoolIsSkipped(): void {
@@ -168,6 +169,9 @@ class LdapSyncTest extends TestCase {
 		);
 
 		$this->teacherMapper->expects($this->never())->method('upsert');
+		// Nothing to keep — and nothing stored either, so there is nothing to
+		// protect and the prune runs as normal. (With rows stored it would be
+		// refused; see testCompletedWalkThatMatchesNothingDoesNotPrune.)
 		$this->teacherMapper->expects($this->once())->method('deleteNotIn')->with([]);
 
 		$sync->run();
@@ -227,8 +231,8 @@ class LdapSyncTest extends TestCase {
 		$stats = $sync->run();
 		$this->assertSame(
 			[
-				'groups' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false],
-				'teachers' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false],
+				'groups' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false, 'reason' => $stats['groups']['reason']],
+				'teachers' => ['seen' => 0, 'kept' => 0, 'pruned' => 0, 'complete' => false, 'reason' => $stats['teachers']['reason']],
 			],
 			$stats,
 		);
@@ -270,15 +274,82 @@ class LdapSyncTest extends TestCase {
 		$this->assertSame(0, $stats['teachers']['pruned']);
 	}
 
+	public function testCompletedWalkThatMatchesNothingDoesNotPrune(): void {
+		// The dangerous shape: user_ldap lists groups and users perfectly well
+		// — so the proxies resolve — but our filtered searches come back empty
+		// because puavoEduGroupType was renamed upstream, or the bind agent
+		// lost read access to it. Nothing throws, so the walk "succeeds" with
+		// an empty result. Pruning against that empties both tables and blanks
+		// every teacher's picker.
+		$sync = $this->makeSync(
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+			],
+			users: [
+				'puavoid=20,ou=people' => ['uid' => 'teacher1', 'puavoschool' => ['puavoId=1,ou=Schools']],
+			],
+			emptySearch: true,
+		);
+
+		// Rows are stored, so there is something to lose and the guard applies.
+		$this->groupMapper->method('listGids')->willReturn(['class_1a', 'class_2b']);
+		$this->teacherMapper->method('listPairs')->willReturn([['alice', 'puavoId=1,ou=Schools']]);
+		$this->groupMapper->expects($this->never())->method('deleteNotIn');
+		$this->teacherMapper->expects($this->never())->method('deleteNotIn');
+
+		$stats = $sync->run();
+
+		$this->assertSame(0, $stats['groups']['pruned']);
+		$this->assertFalse($stats['groups']['complete']);
+		$this->assertStringContainsString(LdapSync::GROUP_TYPE_ATTR, (string)$stats['groups']['reason']);
+
+		$this->assertSame(0, $stats['teachers']['pruned']);
+		$this->assertFalse($stats['teachers']['complete']);
+		$this->assertStringContainsString(LdapSync::AFFILIATION_ATTR, (string)$stats['teachers']['reason']);
+	}
+
+	public function testEmptyResultAgainstEmptyTablesIsNotTreatedAsFailure(): void {
+		// Same empty walk, but nothing is stored yet — a directory still being
+		// populated. There are no rows to lose, so refusing would be a false
+		// alarm during provisioning: report it plainly and succeed.
+		$sync = $this->makeSync(
+			groups: [
+				'puavoid=10,ou=groups' => ['gid' => 'class_1a', 'puavoedugrouptype' => ['year class']],
+			],
+			users: [
+				'puavoid=20,ou=people' => ['uid' => 'teacher1', 'puavoschool' => ['puavoId=1,ou=Schools']],
+			],
+			emptySearch: true,
+		);
+
+		$this->groupMapper->method('listGids')->willReturn([]);
+		$this->teacherMapper->method('listPairs')->willReturn([]);
+		$this->groupMapper->expects($this->once())->method('deleteNotIn')->with([])->willReturn(0);
+		$this->teacherMapper->expects($this->once())->method('deleteNotIn')->with([])->willReturn(0);
+
+		$stats = $sync->run();
+
+		$this->assertTrue($stats['groups']['complete']);
+		$this->assertNull($stats['groups']['reason']);
+		$this->assertTrue($stats['teachers']['complete']);
+		$this->assertNull($stats['teachers']['reason']);
+	}
+
 	/**
 	 * Build an LdapSync subclass with fake Group_Proxy / User_Proxy.
 	 *
 	 * @param array<string, array{gid: ?string, puavoedugrouptype: list<string>}> $groups DN-keyed
 	 * @param array<string, array{uid: ?string}> $users DN-keyed
 	 */
-	private function makeSync(array $groups, array $users, array $schools = [], bool $searchThrows = false): LdapSyncTestDouble {
-		$groupAccess = $this->buildAccess($groups, $schools, $searchThrows);
-		$userAccess = $this->buildAccess($users, [], $searchThrows);
+	private function makeSync(
+		array $groups,
+		array $users,
+		array $schools = [],
+		bool $searchThrows = false,
+		bool $emptySearch = false,
+	): LdapSyncTestDouble {
+		$groupAccess = $this->buildAccess($groups, $schools, $searchThrows, $emptySearch);
+		$userAccess = $this->buildAccess($users, [], $searchThrows, $emptySearch);
 
 		$groupSample = array_values($groups)[0]['gid'] ?? null;
 		$userSample = array_values($users)[0]['uid'] ?? null;
@@ -297,8 +368,13 @@ class LdapSyncTest extends TestCase {
 	/**
 	 * @param array<string, array<string, mixed>> $records DN-keyed test data
 	 */
-	private function buildAccess(array $records, array $schoolDirectory, bool $searchThrows = false): object {
-		return new class($records, $schoolDirectory, $searchThrows) {
+	private function buildAccess(
+		array $records,
+		array $schoolDirectory,
+		bool $searchThrows = false,
+		bool $emptySearch = false,
+	): object {
+		return new class($records, $schoolDirectory, $searchThrows, $emptySearch) {
 			/** @var list<array<int, string>> */
 			public array $capturedFilterCalls = [];
 
@@ -309,6 +385,7 @@ class LdapSyncTest extends TestCase {
 				private array $records,
 				private array $schoolDirectory,
 				private bool $searchThrows,
+				private bool $emptySearch,
 			) {
 			}
 
@@ -343,6 +420,11 @@ class LdapSyncTest extends TestCase {
 			}
 
 			private function materialize(int $offset, int $limit): array {
+				if ($this->emptySearch) {
+					// The filtered search matches nothing, even though the
+					// records are there for getGroups()/getUsers() to sample.
+					return [];
+				}
 				$out = [];
 				$dns = array_keys($this->records);
 				foreach (array_slice($dns, $offset, $limit) as $dn) {

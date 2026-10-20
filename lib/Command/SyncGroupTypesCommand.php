@@ -31,25 +31,26 @@ class SyncGroupTypesCommand extends Command {
 			$stats['groups']['seen'],
 			$stats['groups']['kept'],
 			$stats['groups']['pruned'],
-			$stats['groups']['complete'] ? '' : '  INCOMPLETE (prune skipped)',
+			$stats['groups']['reason'] === null ? '' : '  PRUNE SKIPPED: ' . $stats['groups']['reason'],
 		));
 		$output->writeln(sprintf(
 			'Teachers: seen=%d kept=%d pruned=%d%s',
 			$stats['teachers']['seen'],
 			$stats['teachers']['kept'],
 			$stats['teachers']['pruned'],
-			$stats['teachers']['complete'] ? '' : '  INCOMPLETE (prune skipped)',
+			$stats['teachers']['reason'] === null ? '' : '  PRUNE SKIPPED: ' . $stats['teachers']['reason'],
 		));
 
 		if ($stats['groups']['complete'] && $stats['teachers']['complete']) {
 			return self::SUCCESS;
 		}
 
-		// Non-zero so a cron wrapper or deploy script notices. The tables were
-		// left alone rather than pruned against a partial read, so the previous
-		// contents are still in place — rerun once LDAP is reachable again.
+		// Non-zero so a cron wrapper or deploy script notices. Whatever the
+		// reason, the tables were left exactly as the last good run wrote them
+		// rather than pruned against a result we don't trust, so sharing keeps
+		// working on yesterday's data until this is sorted out.
 		$output->writeln('');
-		$output->writeln('<error>The LDAP walk did not finish. Nothing was pruned; see the Nextcloud log.</error>');
+		$output->writeln('<error>Nothing was pruned: this run did not produce a trustworthy picture of LDAP.</error>');
 		return self::FAILURE;
 	}
 }

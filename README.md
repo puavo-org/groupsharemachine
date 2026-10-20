@@ -107,13 +107,21 @@ Reading the counters:
 
 `kept=0` on either line means nothing matched — see the [Requirements](#requirements) above and the troubleshooting notes in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
-A line can also end with `INCOMPLETE (prune skipped)`:
+A line can also end with `PRUNE SKIPPED`, naming the reason:
 
 ```
-Groups:   seen=120 kept=120 pruned=0  INCOMPLETE (prune skipped)
+Groups:   seen=0 kept=0 pruned=0  PRUNE SKIPPED: no class groups matched — check puavoEduGroupType
 ```
 
-That means the LDAP walk did not finish — the directory became unreachable part-way, or user_ldap is not available at all. Rows are then left exactly as the last good run wrote them instead of being pruned against a partial read, because pruning against half a directory would delete every group the sync never got to see. The command exits non-zero so a cron wrapper or deploy script notices; the reason is in the Nextcloud log. Rerun once LDAP is reachable and the counters return to normal.
+The sync prunes only when the run produced a trustworthy picture of LDAP. It refuses in three cases:
+
+- **the LDAP search failed part-way** — the directory became unreachable mid-walk, so the groups already read are not the whole set;
+- **user_ldap is unavailable** — nothing was read at all;
+- **nothing matched** — the walk finished cleanly but found no class groups (or no teachers). A Puavo directory with none of either is not a state this app is deployed into, so the likely causes are the `puavoEduGroupType` / `puavoEduPersonAffiliation` values changing upstream, or the bind agent losing read access to one of them. Both leave user_ldap listing entries normally while this app's filter matches none.
+
+In all three the rows stay exactly as the last good run wrote them, so **sharing keeps working on the previous data** while the cause is found — pruning instead would empty the table and blank every teacher's picker. The command exits non-zero so a cron wrapper or deploy script notices, and the Nextcloud log carries a warning naming the attribute to check. Fix the cause and rerun; one sync restores the counters.
+
+The "nothing matched" refusal only applies when there are rows to lose. On a directory still being populated both the table and the result are empty, so there is nothing to protect — the sync reports `seen=0 kept=0` and exits 0, as it always did. Check `kept` on a first run: a zero there still means the filters need attention.
 
 The 15-minute refresh runs as a Nextcloud background job, so it only happens if `cron.php` (or AJAX/webcron) is actually running on the instance — check with `occ background-job:list`.
 
