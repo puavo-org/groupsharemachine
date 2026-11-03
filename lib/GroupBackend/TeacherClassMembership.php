@@ -13,7 +13,8 @@ use OCP\GroupInterface;
 /**
  * Virtual group backend. Makes teachers (per the LDAP-synced teachers
  * table) appear as members of every group recorded in the class-groups
- * table for the purposes of Share20\Manager::groupCreateChecks() — which
+ * table for the purposes of the share check — Share20\Manager::groupCreateChecks()
+ * up to NC 34.0.1, core's RestrictInteractionListener from 34.0.2 — which
  * calls IGroup::inGroup($sharedBy) and accepts YES from any backend.
  *
  * Deliberately returns [] from getUserGroups() so teachers don't see those

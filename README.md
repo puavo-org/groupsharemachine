@@ -23,7 +23,7 @@ Reading `puavoEduPersonAffiliation` directly (rather than via Nextcloud's `role`
 
 ## Requirements
 
-- Nextcloud 31, 32, or 33
+- Nextcloud 32, 33, or 34
 - PHP 8.1+
 - A **Puavo** LDAP instance, reachable from Nextcloud
 - `user_ldap` enabled and bound against that Puavo LDAP — without this the app has nothing to read and `occ groupsharemachine:sync` reports `seen=0`
@@ -46,7 +46,7 @@ Either build a tarball from a checkout (on any machine with `make`):
 ```bash
 git clone https://github.com/puavo-org/groupsharemachine.git
 cd groupsharemachine
-git checkout v1.0.2          # or the version you want
+git checkout v1.1.0          # or the version you want
 make                         # -> build/groupsharemachine.tar.gz
 ```
 

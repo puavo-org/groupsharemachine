@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC0-1.0
 
 # Local development with Docker
 
-This guide walks through running Group Share Machine against a local Nextcloud server using the upstream [`nextcloud-docker-dev`](https://github.com/juliusknorr/nextcloud-docker-dev) setup. It targets `stable33` by default but the same workflow works for `stable31` and `stable32`.
+This guide walks through running Group Share Machine against a local Nextcloud server using the upstream [`nextcloud-docker-dev`](https://github.com/juliusknorr/nextcloud-docker-dev) setup. It targets `stable33` by default but the same workflow works for `stable32` and `stable34`.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ cd nextcloud-docker-dev
 Add `nextcloud.local` and any `stableNN.local` hostnames you plan to use to `/etc/hosts`:
 
 ```
-127.0.0.1  nextcloud.local stable31.local stable32.local stable33.local
+127.0.0.1  nextcloud.local stable32.local stable33.local stable34.local
 ```
 
 ### Clone the stable branches you want to use
@@ -54,7 +54,7 @@ git clone --depth=1 --branch stable33 \
 git -C workspace/stable33 submodule update --init      # 3rdparty etc.
 ```
 
-Repeat for `stable31` / `stable32` to test the app's lower NC versions. Drop `--depth=1` if you want full git history.
+Repeat for `stable32` / `stable34` to test the app's other supported NC versions. Drop `--depth=1` if you want full git history.
 
 ## 2. Mount this repo as an extra app
 
@@ -68,13 +68,13 @@ The clean fix is a real bind mount via a Compose override — no extra apps-extr
 
 ```yaml
 services:
-  stable31:
-    volumes:
-      - /home/<you>/dev/nextcloud/groupsharemachine:/var/www/html/apps-shared/groupsharemachine
   stable32:
     volumes:
       - /home/<you>/dev/nextcloud/groupsharemachine:/var/www/html/apps-shared/groupsharemachine
   stable33:
+    volumes:
+      - /home/<you>/dev/nextcloud/groupsharemachine:/var/www/html/apps-shared/groupsharemachine
+  stable34:
     volumes:
       - /home/<you>/dev/nextcloud/groupsharemachine:/var/www/html/apps-shared/groupsharemachine
   nextcloud:
@@ -106,8 +106,8 @@ sudo docker compose up -d stable33
 For the other supported versions (each needs its own `workspace/stableNN` clone first):
 
 ```bash
-sudo docker compose up -d stable31   # min supported
-sudo docker compose up -d stable32
+sudo docker compose up -d stable32   # min supported
+sudo docker compose up -d stable34   # max supported
 ```
 
 Each service is reachable at `http://stableNN.local`. Default login is `admin` / `admin`. First boot autoinstalls Nextcloud — watch progress with `sudo docker compose logs -f stable33`.
@@ -330,12 +330,12 @@ make test test_container=master-stable32-1
 
 ### Updating the nextcloud/ocp stub
 
-`nextcloud/ocp` provides the `OCP\*` signatures Psalm checks against. `composer.json` pins it to `dev-stable31` on purpose — the **oldest** version the app supports — so Psalm fails if we call an API that only exists in a newer Nextcloud. Bump the pin only when the supported range's floor moves.
+`nextcloud/ocp` provides the `OCP\*` signatures Psalm checks against. `composer.json` pins it to `dev-stable32` on purpose — the **oldest** version the app supports — so Psalm fails if we call an API that only exists in a newer Nextcloud. Bump the pin only when the supported range's floor moves.
 
-Refreshing the stub to the current stable31 snapshot is manual:
+Refreshing the stub to the current stable32 snapshot is manual:
 
 ```bash
-composer require --dev nextcloud/ocp:dev-stable31
+composer require --dev nextcloud/ocp:dev-stable32
 git checkout vendor-bin          # composer install rewrites these locks; keep
 git clean -f vendor-bin          # the change limited to composer.lock
 composer psalm
