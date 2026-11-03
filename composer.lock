@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0950f414ccd0849b0737d91ef509f9d7",
+    "content-hash": "45ace43e77d83b18c1a823fff777036f",
     "packages": [
         {
             "name": "bamarni/composer-bin-plugin",
@@ -67,16 +67,16 @@
     "packages-dev": [
         {
             "name": "nextcloud/ocp",
-            "version": "dev-stable31",
+            "version": "dev-stable32",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nextcloud-deps/ocp.git",
-                "reference": "6f810d951d6a012d6365b9b7e60a95ba68fb5ca1"
+                "reference": "ddf8c9e2bc6913d5184e2c5d7ed1f29a6f9ae58b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nextcloud-deps/ocp/zipball/6f810d951d6a012d6365b9b7e60a95ba68fb5ca1",
-                "reference": "6f810d951d6a012d6365b9b7e60a95ba68fb5ca1",
+                "url": "https://api.github.com/repos/nextcloud-deps/ocp/zipball/ddf8c9e2bc6913d5184e2c5d7ed1f29a6f9ae58b",
+                "reference": "ddf8c9e2bc6913d5184e2c5d7ed1f29a6f9ae58b",
                 "shasum": ""
             },
             "require": {
@@ -89,7 +89,7 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-stable31": "31.0.0-dev"
+                    "dev-stable32": "32.0.0-dev"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -109,9 +109,10 @@
             "description": "Composer package containing Nextcloud's public OCP API and the unstable NCU API",
             "support": {
                 "issues": "https://github.com/nextcloud-deps/ocp/issues",
-                "source": "https://github.com/nextcloud-deps/ocp/tree/stable31"
+                "source": "https://github.com/nextcloud-deps/ocp/tree/stable32"
             },
-            "time": "2026-04-23T01:28:54+00:00"
+            "time": "2026-10-29T03:21:52+00:00",
+            "published-time": "2026-10-29T03:21:58+00:00"
         },
         {
             "name": "psr/clock",
@@ -1393,9 +1394,9 @@
     "platform": {
         "php": "^8.1"
     },
-    "platform-dev": [],
+    "platform-dev": {},
     "platform-overrides": {
         "php": "8.1"
     },
-    "plugin-api-version": "2.3.0"
+    "plugin-api-version": "2.11.0"
 }

@@ -71,6 +71,32 @@ if (is_null($sharedWith) || in_array(...) || !$sharedWith->inGroup($sharedBy)) {
 }
 ```
 
+Nextcloud 34.0.2 moved this rule out of `groupCreateChecks()` into core's
+`RestrictInteractionListener`, which `Manager::generalChecks()` reaches by
+dispatching a `RestrictInteractionEvent` with a `GroupReceiver`. The test is
+the same `inGroup()` call:
+
+```php
+// core/Listener/RestrictInteractionListener.php  (NC 34.0.2+)
+if ($receiver instanceof GroupReceiver && (!$receiver->getGroup()->inGroup($event->getUser()) || in_array(...))) {
+    throw new InteractionRestrictedException('Sharing is only allowed to the groups the user is a member of.', ...);
+}
+```
+
+One behavioural difference: the event is dispatched for the share **owner**
+as well as the sharer whenever the owner is known and differs. On create it
+is not known yet — `createShare()` calls `generalChecks()` before it sets the
+owner — so creating a reshare still checks the sharer only. `updateShare()`
+runs the same checks on a share that already has its owner, so **editing** a
+reshare (note, permissions, expiry) also requires the file's owner to be "in"
+the class group: a real LDAP member, or a teacher at that group's school.
+
+The consequence: a teacher can reshare a colleague's file to their own class,
+but if the colleague does not teach at that school, later edits of that share
+fail with "Sharing is only allowed within your own groups". The app cannot
+change this; the check asks `inGroup()` about the owner, and answering YES
+for a non-teacher would break the school boundary. Verified on 34.0.5.
+
 `IGroup::inGroup()` is OR-aggregated across all backends that claimed
 `groupExists($gid)`, so a backend can answer "yes, this user is a member" for
 sharing purposes without the group appearing anywhere else. That is the second
@@ -107,7 +133,7 @@ out of the calendar share picker (`searchPrincipals`) and the share itself is
 refused (`findByUri`). Two further notes:
 
 - `shareWithGroupMembersOnlyExcludeGroupsList()` — the official escape hatch,
-  honoured by files sharing (`Manager.php:461`, `:522`) — has **no references
+  honoured by files sharing (`Manager.php:461`, `:522` on NC 33; `RestrictInteractionListener` on NC 34.0.2+) — has **no references
   anywhere in `apps/dav`**. Exempting a group fixes files and not calendars.
 - `GroupPrincipalBackend` is constructed inside the `dav` app, so an app
   container cannot decorate or replace it. Fixing this properly means an

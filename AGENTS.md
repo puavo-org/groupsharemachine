@@ -27,7 +27,7 @@ Read [`SHARING-INTERNALS.md`](SHARING-INTERNALS.md) for the Nextcloud code paths
 | `make` | Build `build/groupsharemachine.tar.gz` |
 | `make sign` | Same but signs via `occ integrity:sign-app` (cert in `~/.nextcloud/certificates/`) |
 
-After any PHP edit, the loop is: `composer cs:fix` → `composer psalm` → `make test`. CI runs all three plus REUSE compliance and a phpunit matrix across MySQL/PgSQL/SQLite × stable31/32/33.
+After any PHP edit, the loop is: `composer cs:fix` → `composer psalm` → `make test`. CI runs all three plus REUSE compliance and a phpunit matrix across MySQL/PgSQL/SQLite × stable32/33/34.
 
 ## Conventions
 
@@ -72,6 +72,9 @@ Nextcloud uses two **distinct** code paths for a group share — the picker (aut
                                        │     $sharedWith = groupManager->get(gid)    │
                                        │     if !$sharedWith->inGroup($sharedBy):    │
                                        │         throw "only your own groups"        │
+                                       │  (NC 34.0.2+: same test, moved to core's    │
+                                       │   RestrictInteractionListener; on updates   │
+                                       │   it also checks the share owner)           │
                                        └──────────────┬──────────────────────────────┘
                                                       │ inGroup() iterates all backends
                                                       │ that previously claimed groupExists($gid)
